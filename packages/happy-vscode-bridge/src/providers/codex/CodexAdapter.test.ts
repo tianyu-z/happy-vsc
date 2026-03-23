@@ -63,6 +63,67 @@ describe('CodexAdapter', () => {
     expect(sessions[0].degradedFlags).toContain('attachment_bridge_unavailable');
   });
 
+  it('surfaces missing approval and interrupt bridges explicitly', async () => {
+    const adapter = new CodexAdapter({
+      liveSource: {
+        listLiveSessions: async () => [
+          {
+            providerSessionRef: 'codex-live-bridge-gaps',
+            title: 'Needs Approval And Interrupt Bridges',
+            isLive: true,
+            canAttach: true,
+            supportsApprovals: true,
+            supportsInterrupt: true,
+          },
+        ],
+      },
+      actions: {
+        sendUserMessage: async () => {},
+      },
+      attachmentBridgeAvailable: true,
+    });
+
+    const sessions = await adapter.discover();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].attachability).toBe('attachable_with_degraded_capabilities');
+    expect(sessions[0].degradedFlags).toEqual(
+      expect.arrayContaining([
+        'approval_bridge_unavailable',
+        'interrupt_bridge_unavailable',
+      ]),
+    );
+    expect(sessions[0].capabilities).not.toContain('resolveApproval');
+    expect(sessions[0].capabilities).not.toContain('interrupt');
+  });
+
+  it('marks sessions without send bridge as read-only degraded attach', async () => {
+    const adapter = new CodexAdapter({
+      liveSource: {
+        listLiveSessions: async () => [
+          {
+            providerSessionRef: 'codex-live-read-only',
+            title: 'Read Only Attach',
+            isLive: true,
+            canAttach: true,
+            supportsApprovals: false,
+            supportsInterrupt: false,
+          },
+        ],
+      },
+      actions: {},
+      attachmentBridgeAvailable: true,
+    });
+
+    const sessions = await adapter.discover();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].attachability).toBe('attachable_with_degraded_capabilities');
+    expect(sessions[0].degradedFlags).toContain('read_only_attach');
+    expect(sessions[0].capabilities).not.toContain('sendUserMessage');
+    expect(adapter.getHealth('codex-live-read-only')).toMatchObject({
+      readOnlyAttach: true,
+    });
+  });
+
   it('uses metadata as enrichment only and does not discover metadata-only sessions', async () => {
     const listSessionMetadata = vi.fn(async () => [
       {

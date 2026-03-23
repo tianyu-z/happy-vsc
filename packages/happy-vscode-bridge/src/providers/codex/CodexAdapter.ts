@@ -155,6 +155,7 @@ export class CodexAdapter implements ProviderAdapter {
     return {
       approvalBridgeAvailable: !session.degradedFlags.includes('approval_bridge_unavailable'),
       attachmentBridgeAvailable: !session.degradedFlags.includes('attachment_bridge_unavailable'),
+      readOnlyAttach: session.degradedFlags.includes('read_only_attach'),
       degradedFlags: [...session.degradedFlags],
     };
   }
@@ -188,6 +189,8 @@ export class CodexAdapter implements ProviderAdapter {
 
     if (this.actions.sendUserMessage) {
       capabilities.push('sendUserMessage');
+    } else {
+      degradedFlags.push('read_only_attach');
     }
 
     if (candidate.supportsInterrupt && this.actions.interrupt) {
