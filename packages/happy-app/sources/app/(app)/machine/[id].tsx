@@ -142,6 +142,10 @@ export default function MachineDetailScreen() {
             .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
             .slice(0, 5);
     }, [machineSessions]);
+    const attachableBrokerSessions = useMemo(
+        () => brokerSessions.filter((session) => canAttachBrokerSession(session)),
+        [brokerSessions],
+    );
 
     const recentPaths = useMemo(() => {
         const paths = new Set<string>();
@@ -824,9 +828,8 @@ export default function MachineDetailScreen() {
                                 detail={t('common.retry')}
                                 showChevron={false}
                             />
-                        ) : brokerSessions.length > 0 ? (
-                            brokerSessions.map((brokerSession, index) => {
-                                const attachable = canAttachBrokerSession(brokerSession);
+                        ) : attachableBrokerSessions.length > 0 ? (
+                            attachableBrokerSessions.map((brokerSession, index) => {
                                 const degradedMessages = getBrokerSessionDegradedMessages(brokerSession.degradedFlags);
                                 const providerLabel = brokerSession.provider === 'claude' ? 'Claude' : 'Codex';
                                 const subtitle = [
@@ -841,12 +844,11 @@ export default function MachineDetailScreen() {
                                         title={brokerSession.title}
                                         subtitle={subtitle}
                                         subtitleLines={0}
-                                        onPress={attachable ? () => void handleAttachBroker(brokerSession) : undefined}
-                                        disabled={!attachable}
+                                        onPress={() => void handleAttachBroker(brokerSession)}
                                         loading={attachingBrokerSessionId === brokerSession.brokerSessionId}
-                                        detail={attachable ? t('machine.brokerAttach') : undefined}
-                                        showChevron={attachable}
-                                        showDivider={index < brokerSessions.length - 1}
+                                        detail={t('machine.brokerAttach')}
+                                        showChevron
+                                        showDivider={index < attachableBrokerSessions.length - 1}
                                     />
                                 );
                             })
