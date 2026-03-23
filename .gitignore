@@ -57,3 +57,6 @@ tmp/
 
 # Plans (keep local, don't commit)
 docs/plans/*
+
+# Visual companion artifacts (local brainstorming only)
+.superpowers/
