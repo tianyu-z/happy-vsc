@@ -66,6 +66,7 @@ If attach succeeds with degraded capabilities, Happy should still show the sessi
 Current degraded flags:
 
 - `read_only_attach`: Happy is attached in read-only mode.
+- `interrupt_bridge_unavailable`: interrupts stay in VS Code.
 - `approval_bridge_unavailable`: approval requests stay in VS Code.
 - `attachment_bridge_unavailable`: attachments stay in VS Code.
 - `selection_context_stale`: editor selection context may be stale.
