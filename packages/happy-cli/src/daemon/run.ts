@@ -516,18 +516,7 @@ export async function startDaemon(): Promise<void> {
       const { directory, sessionId, resumeSessionId, sessionTitle, skipForkSession, machineId, approvedNewDirectoryCreation = true } = options;
       const isClaudeAgent = !options.agent || options.agent === 'claude';
       let directoryCreated = false;
-      const resolveExtraEnv = async (): Promise<{ extraEnv: Record<string, string> } | SpawnSessionResult> => {
-        const authEnv: Record<string, string> = {};
-        if (options.token) {
-          if (options.agent === 'codex') {
-            const codexHomeDir = tmp.dirSync();
-            fs.writeFile(join(codexHomeDir.name, 'auth.json'), options.token);
-            authEnv.CODEX_HOME = codexHomeDir.name;
-          } else {
-            authEnv.CLAUDE_CODE_OAUTH_TOKEN = options.token;
-          }
-        }
-
+      const resolveProfileEnv = async (): Promise<Record<string, string>> => {
         let profileEnv: Record<string, string> = {};
 
         if (options.environmentVariables && Object.keys(options.environmentVariables).length > 0) {
@@ -554,24 +543,11 @@ export async function startDaemon(): Promise<void> {
           }
         }
 
-        let nextExtraEnv = { ...profileEnv, ...authEnv };
-        if (resumeSessionId && isClaudeAgent) {
-          nextExtraEnv.HAPPY_CLAUDE_BACKFILL = '1';
-          nextExtraEnv.HAPPY_CLAUDE_BACKFILL_MAX_MESSAGES = '200';
-          nextExtraEnv.HAPPY_CLAUDE_BACKFILL_MAX_USER_MESSAGES = '20';
-          nextExtraEnv.HAPPY_CLAUDE_RESUME_SESSION_ID = resumeSessionId;
-          if (skipForkSession) {
-            nextExtraEnv.HAPPY_CLAUDE_SKIP_FORK_SESSION = '1';
-          }
-        }
-        if (resumeSessionId && options.agent === 'gemini') {
-          nextExtraEnv.HAPPY_GEMINI_RESUME_SESSION_ID = resumeSessionId;
-          nextExtraEnv.HAPPY_GEMINI_BACKFILL = '1';
-        }
-        if (resumeSessionId && options.agent === 'codex') {
-          nextExtraEnv.HAPPY_CODEX_RESUME_FILE = resumeSessionId;
-          nextExtraEnv.HAPPY_CODEX_BACKFILL = '1';
-        }
+        return profileEnv;
+      };
+
+      const applySharedSpawnMetadataEnv = (baseEnv: Record<string, string>): Record<string, string> => {
+        let nextExtraEnv = { ...baseEnv };
         if (sessionTitle) {
           nextExtraEnv.HAPPY_SESSION_TITLE = sessionTitle;
         }
@@ -589,6 +565,40 @@ export async function startDaemon(): Promise<void> {
         }
         if (options.mcpServers && options.mcpServers.length > 0) {
           nextExtraEnv.HAPPY_EXTRA_MCP_SERVERS = JSON.stringify(options.mcpServers);
+        }
+        return nextExtraEnv;
+      };
+
+      const resolveExtraEnv = async (): Promise<{ extraEnv: Record<string, string> } | SpawnSessionResult> => {
+        const authEnv: Record<string, string> = {};
+        if (options.token) {
+          if (options.agent === 'codex') {
+            const codexHomeDir = tmp.dirSync();
+            fs.writeFile(join(codexHomeDir.name, 'auth.json'), options.token);
+            authEnv.CODEX_HOME = codexHomeDir.name;
+          } else {
+            authEnv.CLAUDE_CODE_OAUTH_TOKEN = options.token;
+          }
+        }
+
+        const profileEnv = await resolveProfileEnv();
+        let nextExtraEnv = applySharedSpawnMetadataEnv({ ...profileEnv, ...authEnv });
+        if (resumeSessionId && isClaudeAgent) {
+          nextExtraEnv.HAPPY_CLAUDE_BACKFILL = '1';
+          nextExtraEnv.HAPPY_CLAUDE_BACKFILL_MAX_MESSAGES = '200';
+          nextExtraEnv.HAPPY_CLAUDE_BACKFILL_MAX_USER_MESSAGES = '20';
+          nextExtraEnv.HAPPY_CLAUDE_RESUME_SESSION_ID = resumeSessionId;
+          if (skipForkSession) {
+            nextExtraEnv.HAPPY_CLAUDE_SKIP_FORK_SESSION = '1';
+          }
+        }
+        if (resumeSessionId && options.agent === 'gemini') {
+          nextExtraEnv.HAPPY_GEMINI_RESUME_SESSION_ID = resumeSessionId;
+          nextExtraEnv.HAPPY_GEMINI_BACKFILL = '1';
+        }
+        if (resumeSessionId && options.agent === 'codex') {
+          nextExtraEnv.HAPPY_CODEX_RESUME_FILE = resumeSessionId;
+          nextExtraEnv.HAPPY_CODEX_BACKFILL = '1';
         }
         logger.debug(`[DAEMON RUN] Final environment variable keys (before expansion) (${Object.keys(nextExtraEnv).length}): ${Object.keys(nextExtraEnv).join(', ')}`);
 
@@ -621,12 +631,14 @@ export async function startDaemon(): Promise<void> {
         return { extraEnv: nextExtraEnv };
       };
 
-      const extraEnvResult = await resolveExtraEnv();
-      if ('type' in extraEnvResult) {
-        return extraEnvResult;
-      }
-
-      const { extraEnv } = extraEnvResult;
+      const resolveBrokerAttachEnv = async (): Promise<Record<string, string>> => {
+        const profileEnv = await resolveProfileEnv();
+        let nextExtraEnv = applySharedSpawnMetadataEnv({ ...profileEnv });
+        logger.debug(`[DAEMON RUN] Broker attach environment variable keys (before expansion) (${Object.keys(nextExtraEnv).length}): ${Object.keys(nextExtraEnv).join(', ')}`);
+        nextExtraEnv = expandEnvironmentVariables(nextExtraEnv, process.env);
+        logger.debug(`[DAEMON RUN] Broker attach environment variable keys (after expansion) (${Object.keys(nextExtraEnv).length}): ${Object.keys(nextExtraEnv).join(', ')}`);
+        return nextExtraEnv;
+      };
 
       if (options.source === 'broker_attached') {
         if (!options.brokerSessionId) {
@@ -649,11 +661,13 @@ export async function startDaemon(): Promise<void> {
           brokerAttachArgs.push('--broker-url', options.brokerUrl);
         }
 
+        const brokerExtraEnv = await resolveBrokerAttachEnv();
+
         const brokerAttachProcess = spawnHappyCLI(brokerAttachArgs, {
           cwd: options.brokerRootDir ?? directory,
           detached: true,
           stdio: ['ignore', 'pipe', 'pipe'],
-          env: buildSpawnEnvironment(process.env, extraEnv),
+          env: buildSpawnEnvironment(process.env, brokerExtraEnv),
         });
 
         if (!brokerAttachProcess.pid) {
@@ -737,6 +751,13 @@ export async function startDaemon(): Promise<void> {
           };
         }
       }
+
+      const extraEnvResult = await resolveExtraEnv();
+      if ('type' in extraEnvResult) {
+        return extraEnvResult;
+      }
+
+      const { extraEnv } = extraEnvResult;
 
       try {
         // Execute setup scripts before spawning AI agent
