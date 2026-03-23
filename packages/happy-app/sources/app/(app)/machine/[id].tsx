@@ -198,9 +198,7 @@ export default function MachineDetailScreen() {
             setBrokerSessionsError(null);
         } catch (error) {
             setBrokerSessions([]);
-            setBrokerSessionsError(
-                error instanceof Error ? error.message : t('machine.brokerSessionsUnavailable'),
-            );
+            setBrokerSessionsError(t('machine.brokerSessionsUnavailable'));
         } finally {
             setBrokerSessionsLoaded(true);
             setIsLoadingBrokerSessions(false);

@@ -269,8 +269,15 @@ export async function machineListBrokerSessions(
         throw new Error(result.error);
     }
 
+    if (!Array.isArray(result.sessions)) {
+        throw new Error('Invalid broker sessions response');
+    }
+
     return {
-        sessions: brokerDiscoveredSessionSchema.array().parse(result.sessions),
+        sessions: result.sessions.flatMap((session) => {
+            const parsed = brokerDiscoveredSessionSchema.safeParse(session);
+            return parsed.success ? [parsed.data] : [];
+        }),
     };
 }
 

@@ -45,7 +45,7 @@ describe('broker session ops', () => {
         expect(result.sessions[0].provider).toBe('claude');
     });
 
-    it('validates broker session DTOs returned by RPC', async () => {
+    it('filters invalid broker session DTOs instead of failing the whole list', async () => {
         machineRPCMock.mockResolvedValue({
             sessions: [
                 {
@@ -67,13 +67,26 @@ describe('broker session ops', () => {
             ],
         });
 
-        await expect(machineListBrokerSessions('machine-1')).rejects.toThrow();
+        await expect(machineListBrokerSessions('machine-1')).resolves.toEqual({
+            sessions: [
+                {
+                    brokerSessionId: 'broker-sess-1',
+                    provider: 'claude',
+                    title: 'Attach me',
+                    attachability: 'attachable',
+                    capabilities: ['sendUserMessage'],
+                    degradedFlags: [],
+                },
+            ],
+        });
     });
 
     it('rejects broker list responses without a sessions array', async () => {
         machineRPCMock.mockResolvedValue({});
 
-        await expect(machineListBrokerSessions('machine-1')).rejects.toThrow();
+        await expect(machineListBrokerSessions('machine-1')).rejects.toThrow(
+            'Invalid broker sessions response',
+        );
     });
 
     it('calls the machine broker attach RPC with the selected broker session id', async () => {
