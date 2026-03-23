@@ -32,6 +32,12 @@ export interface CreateSessionMetadataOptions {
     machineId: string;
     /** How the session was started */
     startedBy?: 'daemon' | 'terminal';
+    /** Session source marker */
+    source?: 'direct' | 'broker_attached';
+    /** Broker attachment metadata */
+    brokerSessionId?: string;
+    brokerCapabilities?: string[];
+    brokerDegradedFlags?: string[];
 }
 
 /**
@@ -158,6 +164,10 @@ export function createSessionMetadata(opts: CreateSessionMetadataOptions): Sessi
         lifecycleState: 'running',
         lifecycleStateSince: Date.now(),
         flavor: opts.flavor,
+        sessionSource: opts.source ?? 'direct',
+        brokerSessionId: opts.brokerSessionId,
+        brokerCapabilities: opts.brokerCapabilities,
+        brokerDegradedFlags: opts.brokerDegradedFlags,
         // Worktree metadata: env vars from daemon take priority, otherwise detect via git
         ...detectWorktreeMetadata(),
     };

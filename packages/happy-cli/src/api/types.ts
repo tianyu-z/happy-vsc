@@ -360,6 +360,10 @@ export type Metadata = {
   archivedBy?: string,
   archiveReason?: string,
   flavor?: string,
+  sessionSource?: 'direct' | 'broker_attached' | string,
+  brokerSessionId?: string,
+  brokerCapabilities?: string[],
+  brokerDegradedFlags?: string[],
   // Worktree metadata
   isWorktree?: boolean,
   worktreeBasePath?: string,
