@@ -1,7 +1,40 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createSessionMetadata } from '@/utils/createSessionMetadata';
+import { createSessionMetadata } from '../utils/createSessionMetadata';
 import { runBrokerAttachedSession } from './runBrokerAttachedSession';
+
+const { mockApiClientCreate, mockNotifyDaemonSessionStarted, mockReadSettings } = vi.hoisted(
+  () => ({
+    mockApiClientCreate: vi.fn(),
+    mockNotifyDaemonSessionStarted: vi.fn(),
+    mockReadSettings: vi.fn(),
+  }),
+);
+
+vi.mock('../api/api', () => ({
+  ApiClient: {
+    create: mockApiClientCreate,
+  },
+}));
+
+vi.mock('../daemon/controlClient', () => ({
+  notifyDaemonSessionStarted: mockNotifyDaemonSessionStarted,
+}));
+
+vi.mock('../daemon/run', () => ({
+  initialMachineMetadata: {
+    host: 'localhost',
+    platform: 'darwin',
+    happyCliVersion: '0.0.0-test',
+    homeDir: '/tmp',
+    happyHomeDir: '/tmp/.happy',
+    happyLibDir: '/tmp/.happy/lib',
+  },
+}));
+
+vi.mock('../persistence', () => ({
+  readSettings: mockReadSettings,
+}));
 
 describe('createSessionMetadata broker projection', () => {
   it('marks broker-attached sessions with source metadata', () => {

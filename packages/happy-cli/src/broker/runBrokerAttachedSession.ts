@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import type { Metadata } from '@/api/types';
-import { ApiClient } from '@/api/api';
-import { notifyDaemonSessionStarted } from '@/daemon/controlClient';
-import { initialMachineMetadata } from '@/daemon/run';
-import type { Credentials } from '@/persistence';
-import { readSettings } from '@/persistence';
-import { createSessionMetadata } from '@/utils/createSessionMetadata';
+import { ApiClient } from '../api/api';
+import type { Metadata } from '../api/types';
+import { notifyDaemonSessionStarted } from '../daemon/controlClient';
+import { initialMachineMetadata } from '../daemon/run';
+import type { Credentials } from '../persistence';
+import { readSettings } from '../persistence';
+import { createSessionMetadata } from '../utils/createSessionMetadata';
 
 import { BrokerClient } from './BrokerClient';
 import { loadBrokerManifest } from './brokerManifest';

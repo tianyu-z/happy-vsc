@@ -11,10 +11,10 @@ import { readdirSync } from 'node:fs';
 import os from 'node:os';
 import { resolve, join } from 'node:path';
 
-import type { AgentState, Metadata } from '@/api/types';
-import { configuration } from '@/configuration';
-import { projectPath } from '@/projectPath';
-import { detectGitWorktree } from '@/utils/gitWorktree';
+import { configuration } from '../configuration';
+import { projectPath } from '../projectPath';
+import type { AgentState, Metadata } from '../api/types';
+import { detectGitWorktree } from './gitWorktree';
 import packageJson from '../../package.json';
 
 /**
