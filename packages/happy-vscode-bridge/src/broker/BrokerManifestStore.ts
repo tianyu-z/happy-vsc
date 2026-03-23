@@ -1,4 +1,4 @@
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 
 export interface BrokerInstanceManifest {
@@ -9,7 +9,11 @@ export interface BrokerInstanceManifest {
 }
 
 export class BrokerManifestStore {
-  constructor(private readonly file: string) {}
+  private readonly file: string;
+
+  constructor(rootDir: string) {
+    this.file = join(rootDir, 'broker', 'instance.json');
+  }
 
   async write(manifest: BrokerInstanceManifest) {
     await mkdir(dirname(this.file), { recursive: true });
