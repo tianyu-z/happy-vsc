@@ -516,6 +516,84 @@ export async function startDaemon(): Promise<void> {
       const isClaudeAgent = !options.agent || options.agent === 'claude';
       let directoryCreated = false;
 
+      if (options.source === 'broker_attached') {
+        if (!options.brokerSessionId) {
+          return {
+            type: 'error',
+            errorMessage: 'brokerSessionId is required for broker_attached sessions',
+          };
+        }
+
+        const brokerAttachArgs = [
+          'broker-attached-session',
+          '--started-by', 'daemon',
+          '--broker-session-id', options.brokerSessionId,
+        ];
+
+        if (options.brokerRootDir) {
+          brokerAttachArgs.push('--broker-root-dir', options.brokerRootDir);
+        }
+        if (options.brokerUrl) {
+          brokerAttachArgs.push('--broker-url', options.brokerUrl);
+        }
+
+        const brokerAttachProcess = spawnHappyCLI(brokerAttachArgs, {
+          cwd: options.brokerRootDir ?? directory,
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: process.env,
+        });
+
+        if (!brokerAttachProcess.pid) {
+          return {
+            type: 'error',
+            errorMessage: 'Failed to spawn broker-attached Happy process - no PID returned',
+          };
+        }
+
+        const trackedSession: TrackedSession = {
+          startedBy: 'daemon',
+          source: 'broker_attached',
+          brokerSessionId: options.brokerSessionId,
+          pid: brokerAttachProcess.pid,
+          childProcess: brokerAttachProcess,
+        };
+
+        pidToTrackedSession.set(brokerAttachProcess.pid, trackedSession);
+
+        brokerAttachProcess.on('exit', (code, signal) => {
+          logger.debug(`[DAEMON RUN] Broker attach child PID ${brokerAttachProcess.pid} exited with code ${code}, signal ${signal}`);
+          if (brokerAttachProcess.pid) {
+            onChildExited(brokerAttachProcess.pid);
+          }
+        });
+
+        brokerAttachProcess.on('error', (error) => {
+          logger.debug(`[DAEMON RUN] Failed to spawn broker attach child: ${error.message}`);
+          if (brokerAttachProcess.pid) {
+            onChildExited(brokerAttachProcess.pid);
+          }
+        });
+
+        return new Promise((resolve) => {
+          const timeout = setTimeout(() => {
+            pidToAwaiter.delete(brokerAttachProcess.pid!);
+            resolve({
+              type: 'error',
+              errorMessage: `Session webhook timeout for PID ${brokerAttachProcess.pid} (broker-attached)`,
+            });
+          }, 15_000);
+
+          pidToAwaiter.set(brokerAttachProcess.pid!, (completedSession) => {
+            clearTimeout(timeout);
+            resolve({
+              type: 'success',
+              sessionId: completedSession.happySessionId!,
+            });
+          });
+        });
+      }
+
       try {
         await fs.access(directory);
         logger.debug(`[DAEMON RUN] Directory exists: ${directory}`);

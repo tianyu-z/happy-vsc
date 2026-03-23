@@ -10,6 +10,8 @@ import { ChildProcess } from 'child_process';
  */
 export interface TrackedSession {
   startedBy: 'daemon' | string;
+  source?: 'direct' | 'broker_attached';
+  brokerSessionId?: string;
   happySessionId?: string;
   happySessionMetadataFromLocalWebhook?: Metadata;
   pid: number;

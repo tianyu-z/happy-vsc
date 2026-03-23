@@ -5,6 +5,7 @@
 
 import { io, Socket } from 'socket.io-client';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { logger } from '@/ui/logger';
 import { configuration } from '@/configuration';
 import { MachineMetadata, DaemonState, Machine, Update, UpdateMachineBody } from './types';
@@ -22,6 +23,8 @@ import { backoff } from '@/utils/time';
 import { RpcHandlerManager } from './rpc/RpcHandlerManager';
 import { execSync, execFileSync } from 'node:child_process';
 import { readdirSync, rmdirSync } from 'node:fs';
+import { BrokerClient } from '@/broker/BrokerClient';
+import { loadBrokerManifest } from '@/broker/brokerManifest';
 
 function createSessionCacheStatsReporter(
     saveStats: (stats: SessionCacheRuntimeStats) => Promise<void>,
@@ -155,6 +158,11 @@ type MachineRpcHandlers = {
     }>;
 }
 
+type BrokerTransport = {
+    brokerRootDir: string;
+    brokerUrl: string;
+};
+
 export class ApiMachineClient {
     private socket!: Socket<ServerToDaemonEvents, DaemonToServerEvents>;
     private keepAliveInterval: NodeJS.Timeout | null = null;
@@ -202,6 +210,16 @@ export class ApiMachineClient {
         openClawTunnelManager.setEventCallback((tunnelId, event, payload) => {
             this.broadcastOpenClawEvent(tunnelId, event, payload);
         });
+    }
+
+    private async resolveBrokerTransport(): Promise<BrokerTransport> {
+        const brokerRootDir = join(homedir(), '.happy-vsc');
+        const manifest = await loadBrokerManifest(brokerRootDir);
+
+        return {
+            brokerRootDir,
+            brokerUrl: manifest.url,
+        };
     }
 
     /**
@@ -261,6 +279,42 @@ export class ApiMachineClient {
                     logger.debug(`[API MACHINE] Requesting directory creation approval for: ${result.directory}`);
                     return { type: 'requestToApproveDirectoryCreation', directory: result.directory };
 
+                case 'error':
+                    throw new Error(result.errorMessage);
+            }
+        });
+
+        this.rpcHandlerManager.registerHandler('broker-list-sessions', async () => {
+            const transport = await this.resolveBrokerTransport();
+            const brokerClient = new BrokerClient(transport.brokerUrl);
+            const sessions = await brokerClient.discoverSessions();
+            return { sessions };
+        });
+
+        this.rpcHandlerManager.registerHandler('broker-attach-session', async (params: any) => {
+            const { brokerSessionId } = params || {};
+
+            if (!brokerSessionId || typeof brokerSessionId !== 'string') {
+                throw new Error('brokerSessionId is required');
+            }
+
+            const transport = await this.resolveBrokerTransport();
+            const result = await spawnSession({
+                directory: transport.brokerRootDir,
+                source: 'broker_attached',
+                brokerSessionId,
+                brokerUrl: transport.brokerUrl,
+                brokerRootDir: transport.brokerRootDir,
+            });
+
+            switch (result.type) {
+                case 'success':
+                    this.claudeCache.invalidate();
+                    this.geminiCache.invalidate();
+                    this.codexCache.invalidate();
+                    return { type: 'success', sessionId: result.sessionId };
+                case 'requestToApproveDirectoryCreation':
+                    return result;
                 case 'error':
                     throw new Error(result.errorMessage);
             }
