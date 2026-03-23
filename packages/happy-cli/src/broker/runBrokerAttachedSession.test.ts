@@ -37,6 +37,16 @@ vi.mock('../persistence', () => ({
 }));
 
 describe('createSessionMetadata broker projection', () => {
+  it('does not stamp a direct session source for existing session paths', () => {
+    const { metadata } = createSessionMetadata({
+      flavor: 'claude',
+      machineId: 'machine-1',
+      startedBy: 'terminal',
+    });
+
+    expect(metadata.sessionSource).toBeUndefined();
+  });
+
   it('marks broker-attached sessions with source metadata', () => {
     const { metadata } = createSessionMetadata({
       flavor: 'claude',

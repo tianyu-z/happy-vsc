@@ -164,10 +164,12 @@ export function createSessionMetadata(opts: CreateSessionMetadataOptions): Sessi
         lifecycleState: 'running',
         lifecycleStateSince: Date.now(),
         flavor: opts.flavor,
-        sessionSource: opts.source ?? 'direct',
-        brokerSessionId: opts.brokerSessionId,
-        brokerCapabilities: opts.brokerCapabilities,
-        brokerDegradedFlags: opts.brokerDegradedFlags,
+        ...(opts.source ? {
+            sessionSource: opts.source,
+            brokerSessionId: opts.brokerSessionId,
+            brokerCapabilities: opts.brokerCapabilities,
+            brokerDegradedFlags: opts.brokerDegradedFlags,
+        } : {}),
         // Worktree metadata: env vars from daemon take priority, otherwise detect via git
         ...detectWorktreeMetadata(),
     };
