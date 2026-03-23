@@ -68,6 +68,20 @@ export class ProviderAdapterHost {
       }
 
       const sessions = await adapter.discover();
+      const discoveredSessionIds = new Set(
+        sessions.map((session) => session.brokerSessionId),
+      );
+
+      for (const brokerSessionId of Array.from(this.sessions.keys())) {
+        const binding = this.sessions.get(brokerSessionId);
+        if (!binding || binding.provider !== provider) {
+          continue;
+        }
+
+        if (!discoveredSessionIds.has(brokerSessionId)) {
+          this.sessions.delete(brokerSessionId);
+        }
+      }
 
       for (const session of sessions) {
         const health = await this.getHealth(adapter, session.providerSessionRef);
@@ -103,12 +117,18 @@ export class ProviderAdapterHost {
       return null;
     }
 
-    const health = await this.getHealth(adapter, binding.providerSessionRef);
+    const canonicalBrokerSessionId = attachment.brokerSessionId;
+    const canonicalProviderSessionRef = attachment.providerSessionRef;
+    const health = await this.getHealth(adapter, canonicalProviderSessionRef);
     const degradedFlags = mergeDegradedFlags(attachment.degradedFlags, health);
 
-    this.sessions.set(brokerSessionId, {
+    if (canonicalBrokerSessionId !== brokerSessionId) {
+      this.sessions.delete(brokerSessionId);
+    }
+
+    this.sessions.set(canonicalBrokerSessionId, {
       provider: binding.provider,
-      providerSessionRef: binding.providerSessionRef,
+      providerSessionRef: canonicalProviderSessionRef,
       capabilities: attachment.capabilities,
       degradedFlags,
     });

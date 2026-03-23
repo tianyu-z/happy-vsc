@@ -29,6 +29,10 @@ export type ArtifactSnapshot = {
   artifacts: StagedArtifact[];
 };
 
+function cloneArtifact(artifact: StagedArtifact): StagedArtifact {
+  return { ...artifact };
+}
+
 export class ArtifactBridge {
   private nextId = 1;
   private readonly artifacts: StagedArtifact[] = [];
@@ -41,16 +45,21 @@ export class ArtifactBridge {
     };
 
     this.artifacts.push(artifact);
-    return artifact;
+    return cloneArtifact(artifact);
   }
 
   get(id: string): StagedArtifact | undefined {
-    return this.artifacts.find((artifact) => artifact.id === id);
+    const artifact = this.artifacts.find((candidate) => candidate.id === id);
+    if (!artifact) {
+      return undefined;
+    }
+
+    return cloneArtifact(artifact);
   }
 
   snapshot(): ArtifactSnapshot {
     return {
-      artifacts: [...this.artifacts],
+      artifacts: this.artifacts.map((artifact) => cloneArtifact(artifact)),
     };
   }
 }

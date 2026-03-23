@@ -68,4 +68,45 @@ describe('EditorContextBridge', () => {
       hints: 0,
     });
   });
+
+  it('does not leak mutable references from project() or snapshot()', () => {
+    const bridge = new EditorContextBridge();
+    const input = {
+      fileName: '/repo/src/state.ts',
+      selectionText: 'const value = 1',
+      selectionRanges: [
+        {
+          startLine: 1,
+          startCharacter: 0,
+          endLine: 1,
+          endCharacter: 15,
+        },
+      ],
+      visibleFiles: ['/repo/src/state.ts'],
+      openTabs: ['/repo/src/state.ts'],
+      workspaceRoots: ['/repo'],
+      diagnosticsSummary: {
+        errors: 1,
+        warnings: 2,
+      },
+    };
+
+    const projected = bridge.project(input);
+    projected.selectionRanges[0].endLine = 99;
+    projected.visibleFilePaths.push('/repo/src/extra.ts');
+    projected.diagnosticsSummary.errors = 77;
+
+    const projectedAgain = bridge.project(input);
+    expect(projectedAgain.selectionRanges[0].endLine).toBe(1);
+    expect(projectedAgain.visibleFilePaths).toEqual(['/repo/src/state.ts']);
+    expect(projectedAgain.diagnosticsSummary.errors).toBe(1);
+
+    const snap = bridge.snapshot(input);
+    snap.selectionRanges[0].startLine = 42;
+    snap.openTabs.push('/repo/src/new-tab.ts');
+
+    const snapAgain = bridge.snapshot(input);
+    expect(snapAgain.selectionRanges[0].startLine).toBe(1);
+    expect(snapAgain.openTabs).toEqual(['/repo/src/state.ts']);
+  });
 });

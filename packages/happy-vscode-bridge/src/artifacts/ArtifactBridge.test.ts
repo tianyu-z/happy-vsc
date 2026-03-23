@@ -44,4 +44,34 @@ describe('ArtifactBridge', () => {
     expect(bridge.get(image.id)?.mimeType).toBe('image/png');
     expect(bridge.get(diff.id)?.text).toContain('diff --git');
   });
+
+  it('does not leak mutable references from stage/get/snapshot', () => {
+    const bridge = new ArtifactBridge();
+
+    const staged = bridge.stage({
+      kind: 'file',
+      displayName: 'safe.txt',
+      filePath: '/tmp/safe.txt',
+      mimeType: 'text/plain',
+    });
+    if (staged.kind !== 'file') {
+      throw new Error('Expected file artifact');
+    }
+    staged.filePath = '/tmp/mutated.txt';
+
+    const read1 = bridge.get(staged.id)!;
+    if (read1.kind !== 'file') {
+      throw new Error('Expected file artifact');
+    }
+    expect(read1.filePath).toBe('/tmp/safe.txt');
+
+    read1.displayName = 'mutated';
+    const read2 = bridge.get(staged.id)!;
+    expect(read2.displayName).toBe('safe.txt');
+
+    const snap1 = bridge.snapshot();
+    snap1.artifacts[0].displayName = 'snapshot-mutated';
+    const snap2 = bridge.snapshot();
+    expect(snap2.artifacts[0].displayName).toBe('safe.txt');
+  });
 });

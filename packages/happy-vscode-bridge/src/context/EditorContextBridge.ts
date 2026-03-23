@@ -22,6 +22,10 @@ const emptyDiagnostics: BrokerDiagnosticsSummary = {
   hints: 0,
 };
 
+function cloneSelectionRanges(ranges: BrokerSelectionRange[] | undefined): BrokerSelectionRange[] {
+  return (ranges ?? []).map((range) => ({ ...range }));
+}
+
 export class EditorContextBridge {
   snapshot(input: EditorContextProjectionInput = {}): BrokerEditorContext {
     return this.project(input);
@@ -31,10 +35,10 @@ export class EditorContextBridge {
     return {
       activeFilePath: input.fileName ?? null,
       selectedText: input.selectionText ?? null,
-      selectionRanges: input.selectionRanges ?? [],
-      visibleFilePaths: input.visibleFiles ?? [],
-      openTabs: input.openTabs ?? [],
-      workspaceRoots: input.workspaceRoots ?? [],
+      selectionRanges: cloneSelectionRanges(input.selectionRanges),
+      visibleFilePaths: [...(input.visibleFiles ?? [])],
+      openTabs: [...(input.openTabs ?? [])],
+      workspaceRoots: [...(input.workspaceRoots ?? [])],
       gitBranch: input.gitBranch ?? null,
       diagnosticsSummary: {
         ...emptyDiagnostics,

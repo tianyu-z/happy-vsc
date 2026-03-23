@@ -144,4 +144,89 @@ describe('ProviderAdapterHost', () => {
     expect(attach).toHaveBeenNthCalledWith(1, 'provider-session-3');
     expect(attach).toHaveBeenNthCalledWith(2, 'provider-session-3');
   });
+
+  it('updates binding to canonical providerSessionRef returned by attach', async () => {
+    const sendUserMessage = vi.fn(async () => {});
+    const attach = vi.fn(async () => ({
+      brokerSessionId: 'session-4',
+      providerSessionRef: 'provider-session-4-canonical',
+      provider: 'claude' as const,
+      latestSeq: 10,
+      capabilities: ['sendUserMessage'],
+      degradedFlags: [],
+    }));
+
+    const adapter: ProviderAdapter = {
+      discover: async () => [
+        {
+          brokerSessionId: 'session-4',
+          providerSessionRef: 'provider-session-4-tmp',
+          provider: 'claude',
+          title: 'Session 4',
+          attachability: 'attachable',
+          capabilities: ['sendUserMessage'],
+          degradedFlags: [],
+        },
+      ],
+      attach,
+      sendUserMessage,
+      interrupt: async () => {},
+      resolveApproval: async () => {},
+    };
+
+    const host = new ProviderAdapterHost({
+      claude: adapter,
+    });
+
+    await host.discover();
+    await host.attach('session-4');
+    await host.sendMessage('session-4', { text: 'after-attach' });
+
+    expect(attach).toHaveBeenCalledWith('provider-session-4-tmp');
+    expect(sendUserMessage).toHaveBeenCalledWith({
+      brokerSessionId: 'session-4',
+      providerSessionRef: 'provider-session-4-canonical',
+      text: 'after-attach',
+    });
+  });
+
+  it('prunes stale discovered bindings when sessions disappear', async () => {
+    const discover = vi
+      .fn<ProviderAdapter['discover']>()
+      .mockResolvedValueOnce([
+        {
+          brokerSessionId: 'session-stale',
+          providerSessionRef: 'provider-stale',
+          provider: 'codex',
+          title: 'Stale Session',
+          attachability: 'attachable',
+          capabilities: ['sendUserMessage'],
+          degradedFlags: [],
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const adapter: ProviderAdapter = {
+      discover,
+      attach: async () => null,
+      sendUserMessage: async () => {},
+      interrupt: async () => {},
+      resolveApproval: async () => {},
+    };
+
+    const host = new ProviderAdapterHost({
+      codex: adapter,
+    });
+
+    await host.discover();
+    expect(host.getCapabilities('session-stale').capabilities).toEqual(['sendUserMessage']);
+
+    await host.discover();
+
+    expect(host.getCapabilities('session-stale')).toEqual({
+      capabilities: [],
+      degradedFlags: [],
+    });
+    await expect(host.attach('session-stale')).rejects.toThrow('Unknown broker session');
+  });
 });
