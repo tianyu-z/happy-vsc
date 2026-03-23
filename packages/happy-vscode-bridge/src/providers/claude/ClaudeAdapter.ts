@@ -107,6 +107,10 @@ export class ClaudeAdapter implements ProviderAdapter {
       return null;
     }
 
+    if (session.attachability === 'not_attachable') {
+      return null;
+    }
+
     return {
       brokerSessionId: session.brokerSessionId,
       providerSessionRef: session.providerSessionRef,
@@ -161,7 +165,12 @@ export class ClaudeAdapter implements ProviderAdapter {
       return new Map();
     }
 
-    const metadataList = await this.metadataSource.listSessionMetadata();
+    let metadataList: ClaudeSessionMetadata[];
+    try {
+      metadataList = await this.metadataSource.listSessionMetadata();
+    } catch {
+      return new Map();
+    }
     const metadataByRef = new Map<string, ClaudeSessionMetadata>();
 
     for (const metadata of metadataList) {
@@ -195,9 +204,6 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
 
     const baseAttachability = candidate.isLive && candidate.canAttach ? 'attachable' : 'not_attachable';
-    if (baseAttachability === 'not_attachable') {
-      degradedFlags.push('attachment_bridge_unavailable');
-    }
 
     const attachability =
       baseAttachability === 'attachable' && degradedFlags.length > 0

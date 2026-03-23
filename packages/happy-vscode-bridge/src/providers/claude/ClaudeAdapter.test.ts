@@ -115,6 +115,40 @@ describe('ClaudeAdapter', () => {
     );
   });
 
+  it('keeps live discovery working when metadata enrichment throws', async () => {
+    const adapter = new ClaudeAdapter({
+      liveSource: {
+        listLiveSessions: async () => [
+          {
+            providerSessionRef: 'live-metadata-fallback',
+            title: 'Live Title Fallback',
+            isLive: true,
+            canAttach: true,
+            supportsApprovals: false,
+            supportsInterrupt: false,
+          },
+        ],
+      },
+      metadataSource: {
+        listSessionMetadata: async () => {
+          throw new Error('metadata unavailable');
+        },
+      },
+      actions: {
+        sendUserMessage: async () => {},
+      },
+    });
+
+    await expect(adapter.discover()).resolves.toMatchObject([
+      {
+        providerSessionRef: 'live-metadata-fallback',
+        title: 'Live Title Fallback',
+        provider: 'claude',
+        attachability: 'attachable',
+      },
+    ]);
+  });
+
   it('returns not_attachable when core live attach preconditions fail', async () => {
     const adapter = new ClaudeAdapter({
       liveSource: {
@@ -137,6 +171,33 @@ describe('ClaudeAdapter', () => {
     const sessions = await adapter.discover();
     expect(sessions).toHaveLength(1);
     expect(sessions[0].attachability).toBe('not_attachable');
-    expect(sessions[0].degradedFlags).toContain('attachment_bridge_unavailable');
+    expect(sessions[0].degradedFlags).not.toContain('attachment_bridge_unavailable');
+    expect(adapter.getHealth('claude-live-4')).toMatchObject({
+      attachmentBridgeAvailable: true,
+    });
+  });
+
+  it('returns null from attach when the discovered Claude session is not attachable', async () => {
+    const adapter = new ClaudeAdapter({
+      liveSource: {
+        listLiveSessions: async () => [
+          {
+            providerSessionRef: 'claude-live-5',
+            title: 'Still Not Attachable',
+            isLive: true,
+            canAttach: false,
+            supportsApprovals: false,
+            supportsInterrupt: false,
+          },
+        ],
+      },
+      actions: {
+        sendUserMessage: async () => {},
+      },
+    });
+
+    await adapter.discover();
+
+    await expect(adapter.attach('claude-live-5')).resolves.toBeNull();
   });
 });
