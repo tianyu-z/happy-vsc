@@ -4,7 +4,7 @@ import { ProviderAdapterHost } from './ProviderAdapterHost';
 import type { ProviderAdapter } from './types';
 
 describe('ProviderAdapterHost', () => {
-  it('merges adapter health into degraded flags', async () => {
+  it('merges adapter health into degraded flags and marks degraded attachability', async () => {
     const adapter: ProviderAdapter = {
       discover: async () => [
         {
@@ -38,12 +38,13 @@ describe('ProviderAdapterHost', () => {
       claude: adapter,
     });
 
-    await host.discover();
+    const sessions = await host.discover();
 
     expect(host.getCapabilities('session-1').degradedFlags).toContain(
       'approval_bridge_unavailable',
     );
     expect(host.getCapabilities('session-1').degradedFlags).toContain('selection_context_stale');
+    expect(sessions[0].attachability).toBe('attachable_with_degraded_capabilities');
   });
 
   it('routes send/interrupt/approval intents through the mapped adapter session', async () => {
@@ -101,5 +102,46 @@ describe('ProviderAdapterHost', () => {
       approvalId: 'approval-1',
       decision: 'approve',
     });
+  });
+
+  it('attaches with providerSessionRef while keeping broker session path', async () => {
+    const attach = vi.fn(async () => ({
+      brokerSessionId: 'session-3',
+      providerSessionRef: 'provider-session-3',
+      provider: 'claude' as const,
+      latestSeq: 9,
+      capabilities: ['sendUserMessage'],
+      degradedFlags: [],
+    }));
+
+    const adapter: ProviderAdapter = {
+      discover: async () => [
+        {
+          brokerSessionId: 'session-3',
+          providerSessionRef: 'provider-session-3',
+          provider: 'claude',
+          title: 'Session 3',
+          attachability: 'attachable',
+          capabilities: ['sendUserMessage'],
+          degradedFlags: [],
+        },
+      ],
+      attach,
+      sendUserMessage: async () => {},
+      interrupt: async () => {},
+      resolveApproval: async () => {},
+    };
+
+    const host = new ProviderAdapterHost({
+      claude: adapter,
+    });
+
+    await host.discover();
+
+    await host.attach('session-3');
+    await host.attach('provider-session-3');
+
+    expect(attach).toHaveBeenNthCalledWith(1, 'provider-session-3');
+    expect(attach).toHaveBeenNthCalledWith(2, 'provider-session-3');
   });
 });

@@ -3,6 +3,18 @@ import { describe, expect, it } from 'vitest';
 import { EditorContextBridge } from './EditorContextBridge';
 
 describe('EditorContextBridge', () => {
+  it('exposes snapshot() as a provider-agnostic entrypoint', () => {
+    const bridge = new EditorContextBridge();
+
+    const ctx = bridge.snapshot({
+      fileName: '/repo/src/index.ts',
+      selectionText: 'console.log("ok")',
+    });
+
+    expect(ctx.activeFilePath).toBe('/repo/src/index.ts');
+    expect(ctx.selectedText).toBe('console.log("ok")');
+  });
+
   it('projects the active editor into a provider-agnostic context snapshot', () => {
     const bridge = new EditorContextBridge();
 

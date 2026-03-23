@@ -72,6 +72,10 @@ export class ProviderAdapterHost {
       for (const session of sessions) {
         const health = await this.getHealth(adapter, session.providerSessionRef);
         const degradedFlags = mergeDegradedFlags(session.degradedFlags, health);
+        const attachability =
+          session.attachability === 'attachable' && degradedFlags.length > 0
+            ? 'attachable_with_degraded_capabilities'
+            : session.attachability;
 
         this.sessions.set(session.brokerSessionId, {
           provider,
@@ -82,6 +86,7 @@ export class ProviderAdapterHost {
 
         discovered.push({
           ...session,
+          attachability,
           degradedFlags,
         });
       }
@@ -90,8 +95,8 @@ export class ProviderAdapterHost {
     return discovered;
   }
 
-  async attach(brokerSessionId: string): Promise<ProviderAttachment | null> {
-    const { adapter, binding } = this.getAdapterAndBinding(brokerSessionId);
+  async attach(sessionRef: string): Promise<ProviderAttachment | null> {
+    const { adapter, binding, brokerSessionId } = this.getAdapterAndBindingFromRef(sessionRef);
     const attachment = await adapter.attach(binding.providerSessionRef);
 
     if (!attachment) {
@@ -209,5 +214,42 @@ export class ProviderAdapterHost {
     }
 
     return { adapter, binding };
+  }
+
+  private getAdapterAndBindingFromRef(
+    sessionRef: string,
+  ): { adapter: ProviderAdapter; binding: SessionBinding; brokerSessionId: string } {
+    const directBinding = this.sessions.get(sessionRef);
+    if (directBinding) {
+      const adapter = this.adapters[directBinding.provider];
+      if (!adapter) {
+        throw new Error(`No adapter registered for provider: ${directBinding.provider}`);
+      }
+
+      return {
+        adapter,
+        binding: directBinding,
+        brokerSessionId: sessionRef,
+      };
+    }
+
+    for (const [brokerSessionId, binding] of this.sessions.entries()) {
+      if (binding.providerSessionRef !== sessionRef) {
+        continue;
+      }
+
+      const adapter = this.adapters[binding.provider];
+      if (!adapter) {
+        throw new Error(`No adapter registered for provider: ${binding.provider}`);
+      }
+
+      return {
+        adapter,
+        binding,
+        brokerSessionId,
+      };
+    }
+
+    throw new Error(`Unknown broker session: ${sessionRef}`);
   }
 }

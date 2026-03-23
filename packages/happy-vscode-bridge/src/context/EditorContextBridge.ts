@@ -23,7 +23,11 @@ const emptyDiagnostics: BrokerDiagnosticsSummary = {
 };
 
 export class EditorContextBridge {
-  project(input: EditorContextProjectionInput): BrokerEditorContext {
+  snapshot(input: EditorContextProjectionInput = {}): BrokerEditorContext {
+    return this.project(input);
+  }
+
+  project(input: EditorContextProjectionInput = {}): BrokerEditorContext {
     return {
       activeFilePath: input.fileName ?? null,
       selectedText: input.selectionText ?? null,
