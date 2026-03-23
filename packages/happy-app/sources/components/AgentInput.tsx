@@ -71,6 +71,10 @@ interface AgentInputProps {
             gemini?: boolean | null;
         };
     };
+    metadataNotice?: {
+        text: string;
+        color?: string;
+    };
     autocompletePrefixes: string[];
     autocompleteSuggestions: (query: string) => Promise<{ key: string, text: string, component: React.ElementType }[]>;
     usageData?: {
@@ -1121,120 +1125,133 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                 )}
 
                 {/* Connection status, context warning, and permission mode */}
-                {(props.connectionStatus || contextWarning || props.permissionMode) && (
+                {(props.connectionStatus || contextWarning || props.permissionMode || props.metadataNotice) && (
                     <View style={{
                         flexDirection: 'row',
-                        alignItems: 'center',
+                        alignItems: 'flex-start',
                         justifyContent: 'space-between',
                         paddingHorizontal: 16,
                         paddingBottom: 4,
                         minHeight: 20, // Fixed minimum height to prevent jumping
                     }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 11 }}>
-                            {props.connectionStatus && (
-                                <>
-                                    {(props.connectionStatus.onPress || props.connectionStatus.action) ? (
-                                        <Pressable
-                                            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-                                            onPress={() => {
-                                                if (props.connectionStatus?.action === 'openPermission') {
-                                                    hapticsLight();
-                                                    setShowSettings(prev => prev === 'permission' ? false : 'permission');
-                                                } else {
-                                                    props.connectionStatus?.onPress?.();
-                                                }
-                                            }}
-                                            style={({ pressed }) => ({
-                                                flexDirection: 'row',
-                                                alignItems: 'center',
-                                                gap: 4,
-                                                opacity: pressed ? 0.7 : 1
-                                            })}
-                                        >
-                                            {connectionStatusIndicator}
-                                        </Pressable>
-                                    ) : (
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                            {connectionStatusIndicator}
-                                        </View>
-                                    )}
-                                    {/* CLI Status - only shown when provided (wizard only) */}
-                                    {props.connectionStatus.cliStatus && (
+                        <View style={{ flex: 1, gap: 4 }}>
+                            {(props.connectionStatus || contextWarning) && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 11 }}>
+                                    {props.connectionStatus && (
                                         <>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                                <Text style={{
-                                                    fontSize: 11,
-                                                    color: props.connectionStatus.cliStatus.claude
-                                                        ? theme.colors.success
-                                                        : theme.colors.textDestructive,
-                                                    ...Typography.default()
-                                                }}>
-                                                    {props.connectionStatus.cliStatus.claude ? '✓' : '✗'}
-                                                </Text>
-                                                <Text style={{
-                                                    fontSize: 11,
-                                                    color: props.connectionStatus.cliStatus.claude
-                                                        ? theme.colors.success
-                                                        : theme.colors.textDestructive,
-                                                    ...Typography.default()
-                                                }}>
-                                                    claude
-                                                </Text>
-                                            </View>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                                <Text style={{
-                                                    fontSize: 11,
-                                                    color: props.connectionStatus.cliStatus.codex
-                                                        ? theme.colors.success
-                                                        : theme.colors.textDestructive,
-                                                    ...Typography.default()
-                                                }}>
-                                                    {props.connectionStatus.cliStatus.codex ? '✓' : '✗'}
-                                                </Text>
-                                                <Text style={{
-                                                    fontSize: 11,
-                                                    color: props.connectionStatus.cliStatus.codex
-                                                        ? theme.colors.success
-                                                        : theme.colors.textDestructive,
-                                                    ...Typography.default()
-                                                }}>
-                                                    codex
-                                                </Text>
-                                            </View>
-                                            {props.connectionStatus.cliStatus.gemini !== undefined && (
+                                            {(props.connectionStatus.onPress || props.connectionStatus.action) ? (
+                                                <Pressable
+                                                    hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+                                                    onPress={() => {
+                                                        if (props.connectionStatus?.action === 'openPermission') {
+                                                            hapticsLight();
+                                                            setShowSettings(prev => prev === 'permission' ? false : 'permission');
+                                                        } else {
+                                                            props.connectionStatus?.onPress?.();
+                                                        }
+                                                    }}
+                                                    style={({ pressed }) => ({
+                                                        flexDirection: 'row',
+                                                        alignItems: 'center',
+                                                        gap: 4,
+                                                        opacity: pressed ? 0.7 : 1
+                                                    })}
+                                                >
+                                                    {connectionStatusIndicator}
+                                                </Pressable>
+                                            ) : (
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                                    <Text style={{
-                                                        fontSize: 11,
-                                                        color: props.connectionStatus.cliStatus.gemini
-                                                            ? theme.colors.success
-                                                            : theme.colors.textDestructive,
-                                                        ...Typography.default()
-                                                    }}>
-                                                        {props.connectionStatus.cliStatus.gemini ? '✓' : '✗'}
-                                                    </Text>
-                                                    <Text style={{
-                                                        fontSize: 11,
-                                                        color: props.connectionStatus.cliStatus.gemini
-                                                            ? theme.colors.success
-                                                            : theme.colors.textDestructive,
-                                                        ...Typography.default()
-                                                    }}>
-                                                        gemini
-                                                    </Text>
+                                                    {connectionStatusIndicator}
                                                 </View>
+                                            )}
+                                            {/* CLI Status - only shown when provided (wizard only) */}
+                                            {props.connectionStatus.cliStatus && (
+                                                <>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                        <Text style={{
+                                                            fontSize: 11,
+                                                            color: props.connectionStatus.cliStatus.claude
+                                                                ? theme.colors.success
+                                                                : theme.colors.textDestructive,
+                                                            ...Typography.default()
+                                                        }}>
+                                                            {props.connectionStatus.cliStatus.claude ? '✓' : '✗'}
+                                                        </Text>
+                                                        <Text style={{
+                                                            fontSize: 11,
+                                                            color: props.connectionStatus.cliStatus.claude
+                                                                ? theme.colors.success
+                                                                : theme.colors.textDestructive,
+                                                            ...Typography.default()
+                                                        }}>
+                                                            claude
+                                                        </Text>
+                                                    </View>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                        <Text style={{
+                                                            fontSize: 11,
+                                                            color: props.connectionStatus.cliStatus.codex
+                                                                ? theme.colors.success
+                                                                : theme.colors.textDestructive,
+                                                            ...Typography.default()
+                                                        }}>
+                                                            {props.connectionStatus.cliStatus.codex ? '✓' : '✗'}
+                                                        </Text>
+                                                        <Text style={{
+                                                            fontSize: 11,
+                                                            color: props.connectionStatus.cliStatus.codex
+                                                                ? theme.colors.success
+                                                                : theme.colors.textDestructive,
+                                                            ...Typography.default()
+                                                        }}>
+                                                            codex
+                                                        </Text>
+                                                    </View>
+                                                    {props.connectionStatus.cliStatus.gemini !== undefined && (
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                            <Text style={{
+                                                                fontSize: 11,
+                                                                color: props.connectionStatus.cliStatus.gemini
+                                                                    ? theme.colors.success
+                                                                    : theme.colors.textDestructive,
+                                                                ...Typography.default()
+                                                            }}>
+                                                                {props.connectionStatus.cliStatus.gemini ? '✓' : '✗'}
+                                                            </Text>
+                                                            <Text style={{
+                                                                fontSize: 11,
+                                                                color: props.connectionStatus.cliStatus.gemini
+                                                                    ? theme.colors.success
+                                                                    : theme.colors.textDestructive,
+                                                                ...Typography.default()
+                                                            }}>
+                                                                gemini
+                                                            </Text>
+                                                        </View>
+                                                    )}
+                                                </>
                                             )}
                                         </>
                                     )}
-                                </>
+                                    {contextWarning && (
+                                        <Text style={{
+                                            fontSize: 11,
+                                            color: contextWarning.color,
+                                            marginLeft: props.connectionStatus ? 8 : 0,
+                                            ...Typography.default()
+                                        }}>
+                                            {props.connectionStatus ? '• ' : ''}{contextWarning.text}
+                                        </Text>
+                                    )}
+                                </View>
                             )}
-                            {contextWarning && (
+                            {props.metadataNotice && (
                                 <Text style={{
                                     fontSize: 11,
-                                    color: contextWarning.color,
-                                    marginLeft: props.connectionStatus ? 8 : 0,
+                                    color: props.metadataNotice.color ?? theme.colors.textSecondary,
                                     ...Typography.default()
                                 }}>
-                                    {props.connectionStatus ? '• ' : ''}{contextWarning.text}
+                                    {props.metadataNotice.text}
                                 </Text>
                             )}
                         </View>

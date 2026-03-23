@@ -126,16 +126,13 @@ export const SessionView = React.memo((props: { id: string }) => {
             };
         }
 
-        const sessionPath = session.metadata?.path
-            ? formatPathRelativeToHome(session.metadata.path, session.metadata?.homeDir)
-            : undefined;
-        const brokerMetadataSummary = getBrokerSessionMetadataSummary(session.metadata, t);
-
         // Normal state - show session info
         const isConnected = session.presence === 'online';
         return {
             title: getSessionName(session),
-            subtitle: [sessionPath, brokerMetadataSummary].filter(Boolean).join(' • ') || undefined,
+            subtitle: session.metadata?.path
+                ? formatPathRelativeToHome(session.metadata.path, session.metadata?.homeDir)
+                : undefined,
             avatarId: getSessionAvatarId(session),
             onAvatarPress: () => router.push(`/session/${sessionId}/info`),
             isConnected: isConnected,
@@ -803,6 +800,10 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             onDelete={handleDeletePending}
         />
     ) : null;
+    const brokerMetadataSummary = React.useMemo(
+        () => getBrokerSessionMetadataSummary(session.metadata, t),
+        [session.metadata],
+    );
 
     const input = canEdit ? (
         <AgentInput
@@ -818,6 +819,10 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             fastMode={fastMode}
             onFastModeChange={updateFastMode}
             metadata={session.metadata}
+            metadataNotice={brokerMetadataSummary ? {
+                text: brokerMetadataSummary,
+                color: session.metadata?.brokerDegradedFlags?.length ? theme.colors.textDestructive : theme.colors.textSecondary,
+            } : undefined}
             connectionStatus={inputConnectionStatus}
             onSend={async (textSnapshot) => {
                 // Block sending during CLI upgrade
