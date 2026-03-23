@@ -826,6 +826,10 @@ export const zhHant: TranslationStructure = {
         renameSessionSuccess: '工作階段重新命名成功',
         failedToRenameSession: '重新命名工作階段失敗',
         pinSessionTitle: '釘選標題（防止 AI 自動更新）',
+        brokerSource: 'Broker',
+        brokerAttached: 'Broker attached',
+        brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
+        brokerLimitedCapabilities: 'Limited broker capabilities',
         worktree: {
             title: 'Worktree',
             branch: '分支',
@@ -1338,6 +1342,10 @@ export const zhHant: TranslationStructure = {
         addRepository: '新增儲存庫',
         worktreeAutoPath: '由工作區自動管理',
         previousSessions: ({ count }: { count: number }) => `歷史工作階段（最近 ${count} 個）`,
+        brokerSessions: 'VS Code Companion Sessions',
+        brokerSessionsUnavailable: 'Unable to load broker sessions',
+        brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
+        brokerAttach: 'Attach',
     },
 
     repoEdit: {

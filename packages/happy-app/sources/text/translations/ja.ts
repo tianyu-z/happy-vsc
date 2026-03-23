@@ -856,6 +856,10 @@ export const ja: TranslationStructure = {
         renameSessionSuccess: 'セッション名が正常に変更されました',
         failedToRenameSession: 'セッション名の変更に失敗しました',
         pinSessionTitle: 'タイトルを固定（AIの自動更新を防止）',
+        brokerSource: 'Broker',
+        brokerAttached: 'Broker attached',
+        brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
+        brokerLimitedCapabilities: 'Limited broker capabilities',
         worktree: {
             title: 'Worktree',
             branch: 'ブランチ',
@@ -1368,6 +1372,10 @@ export const ja: TranslationStructure = {
         addRepository: 'リポジトリを追加',
         worktreeAutoPath: 'ワークスペースが自動管理',
         previousSessions: ({ count }: { count: number }) => `過去のセッション（最新${count}件）`,
+        brokerSessions: 'VS Code Companion Sessions',
+        brokerSessionsUnavailable: 'Unable to load broker sessions',
+        brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
+        brokerAttach: 'Attach',
     },
 
     repoEdit: {

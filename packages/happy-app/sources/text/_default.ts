@@ -834,6 +834,10 @@ export const en = {
         renameSessionSuccess: 'Session renamed successfully',
         failedToRenameSession: 'Failed to rename session',
         pinSessionTitle: 'Pin title (prevent AI from auto-updating)',
+        brokerSource: 'Broker',
+        brokerAttached: 'Broker attached',
+        brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
+        brokerLimitedCapabilities: 'Limited broker capabilities',
 
         // Worktree lifecycle
         worktree: {
@@ -1354,6 +1358,10 @@ export const en = {
         addRepository: 'Add Repository',
         worktreeAutoPath: 'Auto-managed by workspace',
         previousSessions: ({ count }: { count: number }) => `Previous Sessions (up to ${count} most recent)`,
+        brokerSessions: 'VS Code Companion Sessions',
+        brokerSessionsUnavailable: 'Unable to load broker sessions',
+        brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
+        brokerAttach: 'Attach',
     },
 
     repoEdit: {

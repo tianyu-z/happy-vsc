@@ -6,6 +6,7 @@
 import { apiSocket } from './apiSocket';
 import { sync } from './sync';
 import type { MachineMetadata, Metadata } from './storageTypes';
+import type { BrokerDiscoveredSession } from 'happy-wire';
 
 // Strict type definitions for all operations
 
@@ -245,6 +246,48 @@ export async function machineSpawnNewSession(options: SpawnSessionOptions): Prom
         return {
             type: 'error',
             errorMessage: error instanceof Error ? error.message : 'Failed to spawn session'
+        };
+    }
+}
+
+export async function machineListBrokerSessions(
+    machineId: string,
+): Promise<{ sessions: BrokerDiscoveredSession[] }> {
+    const result = await apiSocket.machineRPC<{
+        sessions?: BrokerDiscoveredSession[];
+        error?: string;
+    }, {}>(
+        machineId,
+        'broker-list-sessions',
+        {},
+    );
+
+    if (!result) {
+        throw new Error('RPC returned empty response');
+    }
+    if (result.error) {
+        throw new Error(result.error);
+    }
+
+    return {
+        sessions: Array.isArray(result.sessions) ? result.sessions : [],
+    };
+}
+
+export async function machineAttachBrokerSession(
+    machineId: string,
+    brokerSessionId: string,
+): Promise<SpawnSessionResult> {
+    try {
+        return await apiSocket.machineRPC<SpawnSessionResult, { brokerSessionId: string }>(
+            machineId,
+            'broker-attach-session',
+            { brokerSessionId },
+        );
+    } catch (error) {
+        return {
+            type: 'error',
+            errorMessage: error instanceof Error ? error.message : 'Failed to attach broker session',
         };
     }
 }

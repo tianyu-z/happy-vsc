@@ -854,6 +854,10 @@ export const it: TranslationStructure = {
         renameSessionSuccess: 'Sessione rinominata con successo',
         failedToRenameSession: 'Impossibile rinominare la sessione',
         pinSessionTitle: 'Fissa il titolo (impedisci l\'aggiornamento automatico dell\'IA)',
+        brokerSource: 'Broker',
+        brokerAttached: 'Broker attached',
+        brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
+        brokerLimitedCapabilities: 'Limited broker capabilities',
         worktree: {
             title: 'Worktree',
             branch: 'Branch',
@@ -1366,6 +1370,10 @@ export const it: TranslationStructure = {
         addRepository: 'Aggiungi repository',
         worktreeAutoPath: 'Gestito automaticamente dal workspace',
         previousSessions: ({ count }: { count: number }) => `Sessioni precedenti (fino a ${count} più recenti)`,
+        brokerSessions: 'VS Code Companion Sessions',
+        brokerSessionsUnavailable: 'Unable to load broker sessions',
+        brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
+        brokerAttach: 'Attach',
     },
 
     repoEdit: {

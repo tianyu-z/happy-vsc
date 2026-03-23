@@ -39,6 +39,10 @@ export const MetadataSchema = z.object({
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(), // Claude Code session ID
     codexSessionId: z.string().optional(), // Codex CLI conversation ID
+    sessionSource: z.string().optional(),
+    brokerSessionId: z.string().optional(),
+    brokerCapabilities: z.array(z.string()).optional(),
+    brokerDegradedFlags: z.array(z.string()).optional(),
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
     homeDir: z.string().optional(), // User's home directory on the machine

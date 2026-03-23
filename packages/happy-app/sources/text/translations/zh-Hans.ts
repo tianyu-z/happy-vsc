@@ -826,6 +826,10 @@ export const zhHans: TranslationStructure = {
         renameSessionSuccess: '会话重命名成功',
         failedToRenameSession: '重命名会话失败',
         pinSessionTitle: '固定标题（阻止 AI 自动更新）',
+        brokerSource: 'Broker',
+        brokerAttached: '已通过 Broker 附着',
+        brokerAttachedMessage: '此会话已附着到 VS Code 中的实时对话。',
+        brokerLimitedCapabilities: 'Broker 能力受限',
         worktree: {
             title: 'Worktree',
             branch: '分支',
@@ -1338,6 +1342,10 @@ export const zhHans: TranslationStructure = {
         addRepository: '添加仓库',
         worktreeAutoPath: '由工作区自动管理',
         previousSessions: ({ count }: { count: number }) => `历史会话（最近 ${count} 个）`,
+        brokerSessions: 'VS Code Companion 会话',
+        brokerSessionsUnavailable: '无法加载 broker 会话',
+        brokerSessionsEmpty: '先在 VS Code 中启动 Claude 或 Codex 会话，再从这里附着',
+        brokerAttach: '附着',
     },
 
     repoEdit: {
