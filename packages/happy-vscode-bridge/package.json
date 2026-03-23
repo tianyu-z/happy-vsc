@@ -2,6 +2,9 @@
   "name": "happy-vscode-bridge",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "happy-wire": "workspace:*"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

@@ -1,50 +1,79 @@
-import type { BrokerEvent, BrokerSnapshot } from 'happy-wire';
+import type {
+  BrokerDiscoveredSession,
+  BrokerEvent,
+  BrokerSnapshot,
+} from 'happy-wire';
 
 export type BrokerLogEntry = {
-  sessionId: string;
   seq: number;
   at: number;
+  sessionId: string;
   event: BrokerEvent;
 };
 
 type SessionProjection = {
-  log: BrokerLogEntry[];
-  snapshot: BrokerSnapshot | null;
+  snapshot?: BrokerSnapshot;
+  discovered?: BrokerDiscoveredSession;
 };
 
 export class SharedSessionStore {
   private seq = 0;
-  private sessions = new Map<string, SessionProjection>();
+  private logs: BrokerLogEntry[] = [];
+  private projections = new Map<string, SessionProjection>();
+  private subscribers = new Set<(entry: BrokerLogEntry) => void>();
 
   append(sessionId: string, event: BrokerEvent): BrokerLogEntry {
     const entry: BrokerLogEntry = {
-      sessionId,
       seq: ++this.seq,
       at: Date.now(),
+      sessionId,
       event,
     };
-
-    const session = this.sessions.get(sessionId) ?? {
-      log: [],
-      snapshot: null,
-    };
-
-    session.log.push(entry);
-
-    if (event.type === 'session.snapshot') {
-      session.snapshot = event.snapshot;
+    this.logs.push(entry);
+    this.projectEvent(entry);
+    for (const callback of this.subscribers) {
+      callback(entry);
     }
-
-    this.sessions.set(sessionId, session);
-
     return entry;
   }
 
-  getSnapshot(sessionId: string): BrokerSnapshot | null {
-    return this.sessions.get(sessionId)?.snapshot ?? null;
+  getSnapshot(sessionId: string): BrokerSnapshot | undefined {
+    return this.projections.get(sessionId)?.snapshot;
   }
 
-  getLog(sessionId: string): BrokerLogEntry[] {
-    return [...(this.sessions.get(sessionId)?.log ?? [])];
+  listSnapshots(): BrokerSnapshot[] {
+    return Array.from(this.projections.values())
+      .map((projection) => projection.snapshot)
+      .filter((snapshot): snapshot is BrokerSnapshot => Boolean(snapshot));
+  }
+
+  listDiscoveredSessions(): BrokerDiscoveredSession[] {
+    return Array.from(this.projections.values())
+      .map((projection) => projection.discovered)
+      .filter(
+        (discovered): discovered is BrokerDiscoveredSession => Boolean(discovered),
+      );
+  }
+
+  subscribe(callback: (entry: BrokerLogEntry) => void): () => void {
+    this.subscribers.add(callback);
+    return () => {
+      this.subscribers.delete(callback);
+    };
+  }
+
+  private projectEvent(entry: BrokerLogEntry) {
+    const projection: SessionProjection =
+      this.projections.get(entry.sessionId) ?? {};
+    if (entry.event.type === 'session.snapshot') {
+      projection.snapshot = {
+        ...entry.event.snapshot,
+        latestSeq: entry.seq,
+      };
+    }
+    if (entry.event.type === 'session.discovered') {
+      projection.discovered = entry.event.session;
+    }
+    this.projections.set(entry.sessionId, projection);
   }
 }
