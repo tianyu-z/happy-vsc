@@ -174,4 +174,70 @@ describe('BrokerClient', () => {
       await server.close();
     }
   });
+
+  it('fails when the broker closes before replying', async () => {
+    const httpServer = createServer();
+    const wsServer = new WebSocketServer({ server: httpServer });
+
+    wsServer.on('connection', (socket) => {
+      socket.on('message', () => {
+        socket.close();
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(0, '127.0.0.1', () => resolve());
+    });
+
+    const address = httpServer.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('failed to bind broker rpc test server');
+    }
+
+    try {
+      const client = new BrokerClient(`ws://127.0.0.1:${address.port}`, 200);
+      await expect(client.discoverSessions()).rejects.toThrow('closed');
+    } finally {
+      for (const socket of wsServer.clients) {
+        socket.close();
+      }
+
+      await new Promise<void>((resolve) => wsServer.close(() => resolve()));
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    }
+  });
+
+  it('fails when the broker does not reply before the request timeout', async () => {
+    const httpServer = createServer();
+    const wsServer = new WebSocketServer({ server: httpServer });
+
+    wsServer.on('connection', (socket) => {
+      socket.on('message', () => {
+        // Intentionally leave the request hanging to exercise the timeout path.
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(0, '127.0.0.1', () => resolve());
+    });
+
+    const address = httpServer.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('failed to bind broker rpc test server');
+    }
+
+    try {
+      const client = new BrokerClient(`ws://127.0.0.1:${address.port}`, 50);
+      await expect(client.discoverSessions()).rejects.toThrow('timed out');
+    } finally {
+      for (const socket of wsServer.clients) {
+        socket.close();
+      }
+
+      await new Promise<void>((resolve) => wsServer.close(() => resolve()));
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    }
+  });
 });
