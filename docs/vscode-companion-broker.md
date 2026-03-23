@@ -19,6 +19,17 @@ Out of scope for this phase:
 - Multi-client concurrent control
 - Gemini
 
+## Manual Verification Checklist
+
+Run this checklist before calling the flow production-ready:
+
+1. Launch the companion extension in an Extension Development Host.
+2. Start an official Claude or Codex session in the same VS Code window.
+3. Verify `broker-list-sessions` returns an attachable session in Happy's `VS Code Companion Sessions` UI / machine RPC path.
+4. Attach from Happy and confirm the new Happy session is marked as broker-backed (`sessionSource=broker_attached`).
+5. Send a message from Happy and confirm it appears inside the official VS Code session.
+6. Trigger approval and interrupt from each side and confirm both surfaces update.
+
 ## Operator Setup
 
 Use this startup order. The broker only discovers sessions that were started in the official plugin first.
@@ -47,17 +58,6 @@ Attachability states:
 - `attachable`: full attach path is available.
 - `attachable_with_degraded_capabilities`: attach still works, but some shared controls remain limited.
 - `not_attachable`: discovery succeeded, but the live session should not be attached.
-
-## Manual Verification Checklist
-
-Run this checklist before calling the flow production-ready:
-
-1. Launch the companion extension in an Extension Development Host.
-2. Start an official Claude or Codex session in the same VS Code window.
-3. Verify Happy surfaces that session as attachable in `VS Code Companion Sessions`.
-4. Attach from Happy and confirm the new Happy session is marked as broker-backed (`sessionSource=broker_attached`).
-5. Send a message from Happy and confirm it appears inside the official VS Code session.
-6. Trigger approval and interrupt from each side and confirm both surfaces update.
 
 ## Degraded Mode
 
