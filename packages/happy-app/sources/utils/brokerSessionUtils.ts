@@ -11,6 +11,7 @@ type BrokerSessionTranslationKey =
     | 'machine.brokerProvider.claude'
     | 'machine.brokerProvider.codex'
     | 'machine.brokerDegradedFlags.read_only_attach'
+    | 'machine.brokerDegradedFlags.interrupt_bridge_unavailable'
     | 'machine.brokerDegradedFlags.approval_bridge_unavailable'
     | 'machine.brokerDegradedFlags.attachment_bridge_unavailable'
     | 'machine.brokerDegradedFlags.selection_context_stale';
@@ -30,6 +31,7 @@ const PROVIDER_LABEL_KEYS: Record<BrokerProvider, BrokerSessionTranslationKey> =
 
 const DEGRADED_FLAG_LABEL_KEYS: Record<string, BrokerSessionTranslationKey> = {
     read_only_attach: 'machine.brokerDegradedFlags.read_only_attach',
+    interrupt_bridge_unavailable: 'machine.brokerDegradedFlags.interrupt_bridge_unavailable',
     approval_bridge_unavailable: 'machine.brokerDegradedFlags.approval_bridge_unavailable',
     attachment_bridge_unavailable: 'machine.brokerDegradedFlags.attachment_bridge_unavailable',
     selection_context_stale: 'machine.brokerDegradedFlags.selection_context_stale',

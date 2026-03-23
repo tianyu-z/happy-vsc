@@ -804,6 +804,25 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
         () => getBrokerSessionMetadataSummary(session.metadata, t),
         [session.metadata],
     );
+    const brokerMetadataNotice = brokerMetadataSummary ? (
+        <View style={{
+            paddingHorizontal: 16,
+            paddingBottom: 4,
+        }}>
+            <Text style={{
+                fontSize: 11,
+                color: session.metadata?.brokerDegradedFlags?.length ? theme.colors.textDestructive : theme.colors.textSecondary,
+            }}>
+                {brokerMetadataSummary}
+            </Text>
+        </View>
+    ) : null;
+    const betweenContentAndInput = (
+        <>
+            {pendingQueuePanel}
+            {brokerMetadataNotice}
+        </>
+    );
 
     const input = canEdit ? (
         <AgentInput
@@ -819,10 +838,6 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             fastMode={fastMode}
             onFastModeChange={updateFastMode}
             metadata={session.metadata}
-            metadataNotice={brokerMetadataSummary ? {
-                text: brokerMetadataSummary,
-                color: session.metadata?.brokerDegradedFlags?.length ? theme.colors.textDestructive : theme.colors.textSecondary,
-            } : undefined}
             connectionStatus={inputConnectionStatus}
             onSend={async (textSnapshot) => {
                 // Block sending during CLI upgrade
@@ -987,7 +1002,7 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
                     content={content}
                     input={input}
                     placeholder={placeholder}
-                    betweenContentAndInput={pendingQueuePanel}
+                    betweenContentAndInput={betweenContentAndInput}
                 />
             </View >
 

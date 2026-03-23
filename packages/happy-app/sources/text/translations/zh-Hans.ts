@@ -1357,6 +1357,7 @@ export const zhHans: TranslationStructure = {
         },
         brokerDegradedFlags: {
             read_only_attach: '只读附着',
+            interrupt_bridge_unavailable: '中断操作仍需在 VS Code 中处理',
             approval_bridge_unavailable: '审批请求仍需在 VS Code 中处理',
             attachment_bridge_unavailable: '附件仍需在 VS Code 中处理',
             selection_context_stale: '编辑器选区上下文可能已过期',

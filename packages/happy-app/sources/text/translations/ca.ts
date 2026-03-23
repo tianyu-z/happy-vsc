@@ -1355,6 +1355,7 @@ export const ca: TranslationStructure = {
         },
         brokerDegradedFlags: {
             read_only_attach: 'Read-only attach',
+            interrupt_bridge_unavailable: 'Interrupts stay in VS Code',
             approval_bridge_unavailable: 'Approval requests stay in VS Code',
             attachment_bridge_unavailable: 'Attachments stay in VS Code',
             selection_context_stale: 'Editor selection may be stale',

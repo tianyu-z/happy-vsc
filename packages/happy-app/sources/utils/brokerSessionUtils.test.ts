@@ -45,6 +45,7 @@ describe('brokerSessionUtils', () => {
     it('maps degraded flags to human-readable warnings', () => {
         const warnings = getBrokerSessionDegradedMessages([
             'read_only_attach',
+            'interrupt_bridge_unavailable',
             'approval_bridge_unavailable',
             'attachment_bridge_unavailable',
             'selection_context_stale',
@@ -52,6 +53,7 @@ describe('brokerSessionUtils', () => {
 
         expect(warnings).toEqual([
             't:machine.brokerDegradedFlags.read_only_attach',
+            't:machine.brokerDegradedFlags.interrupt_bridge_unavailable',
             't:machine.brokerDegradedFlags.approval_bridge_unavailable',
             't:machine.brokerDegradedFlags.attachment_bridge_unavailable',
             't:machine.brokerDegradedFlags.selection_context_stale',
