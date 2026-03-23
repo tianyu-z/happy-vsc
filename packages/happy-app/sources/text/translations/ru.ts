@@ -1343,6 +1343,21 @@ export const ru: TranslationStructure = {
         brokerSessionsUnavailable: 'Unable to load broker sessions',
         brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
         brokerAttach: 'Attach',
+        brokerProvider: {
+            claude: 'Claude',
+            codex: 'Codex',
+        },
+        brokerAttachability: {
+            attachable: 'Ready to attach',
+            attachable_with_degraded_capabilities: 'Attach with limited control',
+            not_attachable: 'Not attachable',
+        },
+        brokerDegradedFlags: {
+            read_only_attach: 'Read-only attach',
+            approval_bridge_unavailable: 'Approval requests stay in VS Code',
+            attachment_bridge_unavailable: 'Attachments stay in VS Code',
+            selection_context_stale: 'Editor selection may be stale',
+        },
     },
 
     repoEdit: {

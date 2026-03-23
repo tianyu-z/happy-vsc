@@ -45,6 +45,37 @@ describe('broker session ops', () => {
         expect(result.sessions[0].provider).toBe('claude');
     });
 
+    it('validates broker session DTOs returned by RPC', async () => {
+        machineRPCMock.mockResolvedValue({
+            sessions: [
+                {
+                    brokerSessionId: 'broker-sess-1',
+                    provider: 'claude',
+                    title: 'Attach me',
+                    attachability: 'attachable',
+                    capabilities: ['sendUserMessage'],
+                    degradedFlags: [],
+                },
+                {
+                    brokerSessionId: 'broker-sess-2',
+                    provider: 'not-a-provider',
+                    title: 'Invalid provider',
+                    attachability: 'attachable',
+                    capabilities: [],
+                    degradedFlags: [],
+                },
+            ],
+        });
+
+        await expect(machineListBrokerSessions('machine-1')).rejects.toThrow();
+    });
+
+    it('rejects broker list responses without a sessions array', async () => {
+        machineRPCMock.mockResolvedValue({});
+
+        await expect(machineListBrokerSessions('machine-1')).rejects.toThrow();
+    });
+
     it('calls the machine broker attach RPC with the selected broker session id', async () => {
         machineRPCMock.mockResolvedValue({
             type: 'success',

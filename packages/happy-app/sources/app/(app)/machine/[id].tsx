@@ -13,7 +13,12 @@ import { machineAttachBrokerSession, machineBash, machineListBrokerSessions, mac
 import { Modal } from '@/modal';
 import { hapticsLight } from '@/components/haptics';
 import { showToast } from '@/components/Toast';
-import { canAttachBrokerSession, getBrokerSessionAttachabilityLabel, getBrokerSessionDegradedMessages } from '@/utils/brokerSessionUtils';
+import {
+    canAttachBrokerSession,
+    getBrokerSessionAttachabilityLabel,
+    getBrokerSessionDegradedMessages,
+    getBrokerSessionProviderLabel,
+} from '@/utils/brokerSessionUtils';
 import { formatPathRelativeToHome, getSessionName, getSessionSubtitle } from '@/utils/sessionUtils';
 import { isMachineOnline } from '@/utils/machineUtils';
 import { sync } from '@/sync/sync';
@@ -175,9 +180,10 @@ export default function MachineDetailScreen() {
         // Use machine online status as proxy for daemon status
         return isMachineOnline(machine) ? 'likely alive' : 'stopped';
     }, [machine]);
+    const isMachineOnlineNow = Boolean(machine && isMachineOnline(machine));
 
     const refreshBrokerSessions = useCallback(async () => {
-        if (!machineId || !machine || !isMachineOnline(machine)) {
+        if (!machineId || !isMachineOnlineNow) {
             setBrokerSessions([]);
             setBrokerSessionsError(null);
             setBrokerSessionsLoaded(false);
@@ -199,7 +205,7 @@ export default function MachineDetailScreen() {
             setBrokerSessionsLoaded(true);
             setIsLoadingBrokerSessions(false);
         }
-    }, [machine, machineId]);
+    }, [isMachineOnlineNow, machineId]);
 
     useEffect(() => {
         void refreshBrokerSessions();
@@ -811,7 +817,7 @@ export default function MachineDetailScreen() {
                     />
                 </ItemGroup>
 
-                {machine && isMachineOnline(machine) && (brokerSessionsLoaded || isLoadingBrokerSessions) && (
+                {machine && isMachineOnlineNow && (brokerSessionsLoaded || isLoadingBrokerSessions) && (
                     <ItemGroup title={t('machine.brokerSessions')}>
                         {isLoadingBrokerSessions ? (
                             <Item
@@ -830,11 +836,17 @@ export default function MachineDetailScreen() {
                             />
                         ) : attachableBrokerSessions.length > 0 ? (
                             attachableBrokerSessions.map((brokerSession, index) => {
-                                const degradedMessages = getBrokerSessionDegradedMessages(brokerSession.degradedFlags);
-                                const providerLabel = brokerSession.provider === 'claude' ? 'Claude' : 'Codex';
+                                const degradedMessages = getBrokerSessionDegradedMessages(
+                                    brokerSession.degradedFlags,
+                                    t,
+                                );
+                                const providerLabel = getBrokerSessionProviderLabel(
+                                    brokerSession.provider,
+                                    t,
+                                );
                                 const subtitle = [
                                     providerLabel,
-                                    getBrokerSessionAttachabilityLabel(brokerSession),
+                                    getBrokerSessionAttachabilityLabel(brokerSession, t),
                                     ...degradedMessages,
                                 ].join('\n');
 

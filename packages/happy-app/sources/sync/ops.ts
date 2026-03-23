@@ -6,7 +6,7 @@
 import { apiSocket } from './apiSocket';
 import { sync } from './sync';
 import type { MachineMetadata, Metadata } from './storageTypes';
-import type { BrokerDiscoveredSession } from 'happy-wire';
+import { brokerDiscoveredSessionSchema, type BrokerDiscoveredSession } from 'happy-wire';
 
 // Strict type definitions for all operations
 
@@ -254,7 +254,7 @@ export async function machineListBrokerSessions(
     machineId: string,
 ): Promise<{ sessions: BrokerDiscoveredSession[] }> {
     const result = await apiSocket.machineRPC<{
-        sessions?: BrokerDiscoveredSession[];
+        sessions?: unknown;
         error?: string;
     }, {}>(
         machineId,
@@ -270,7 +270,7 @@ export async function machineListBrokerSessions(
     }
 
     return {
-        sessions: Array.isArray(result.sessions) ? result.sessions : [],
+        sessions: brokerDiscoveredSessionSchema.array().parse(result.sessions),
     };
 }
 

@@ -1346,6 +1346,21 @@ export const zhHans: TranslationStructure = {
         brokerSessionsUnavailable: '无法加载 broker 会话',
         brokerSessionsEmpty: '先在 VS Code 中启动 Claude 或 Codex 会话，再从这里附着',
         brokerAttach: '附着',
+        brokerProvider: {
+            claude: 'Claude',
+            codex: 'Codex',
+        },
+        brokerAttachability: {
+            attachable: '可直接附着',
+            attachable_with_degraded_capabilities: '可附着，但控制受限',
+            not_attachable: '不可附着',
+        },
+        brokerDegradedFlags: {
+            read_only_attach: '只读附着',
+            approval_bridge_unavailable: '审批请求仍需在 VS Code 中处理',
+            attachment_bridge_unavailable: '附件仍需在 VS Code 中处理',
+            selection_context_stale: '编辑器选区上下文可能已过期',
+        },
     },
 
     repoEdit: {

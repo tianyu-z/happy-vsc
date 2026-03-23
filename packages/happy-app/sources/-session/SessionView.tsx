@@ -27,7 +27,7 @@ import { tracking, trackMessageSent } from '@/track';
 import { handleImagePasteEvent } from '@/utils/imagePaste';
 import { isRunningOnMac } from '@/utils/platform';
 import { useDeviceType, useHeaderHeight, useIsLandscape, useIsTablet } from '@/utils/responsive';
-import { getBrokerSessionBadge, getBrokerSessionDegradedMessages } from '@/utils/brokerSessionUtils';
+import { getBrokerSessionMetadataSummary } from '@/utils/brokerSessionUtils';
 import { formatPathRelativeToHome, generateCopyTitle, getSessionAvatarId, getSessionName, useSessionStatus, copySessionMetadata } from '@/utils/sessionUtils';
 import { isVersionSupported, useLatestCliVersion } from '@/utils/versionUtils';
 import { log } from '@/log';
@@ -126,11 +126,16 @@ export const SessionView = React.memo((props: { id: string }) => {
             };
         }
 
+        const sessionPath = session.metadata?.path
+            ? formatPathRelativeToHome(session.metadata.path, session.metadata?.homeDir)
+            : undefined;
+        const brokerMetadataSummary = getBrokerSessionMetadataSummary(session.metadata, t);
+
         // Normal state - show session info
         const isConnected = session.presence === 'online';
         return {
             title: getSessionName(session),
-            subtitle: session.metadata?.path ? formatPathRelativeToHome(session.metadata.path, session.metadata?.homeDir) : undefined,
+            subtitle: [sessionPath, brokerMetadataSummary].filter(Boolean).join(' • ') || undefined,
             avatarId: getSessionAvatarId(session),
             onAvatarPress: () => router.push(`/session/${sessionId}/info`),
             isConnected: isConnected,
@@ -798,12 +803,6 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             onDelete={handleDeletePending}
         />
     ) : null;
-    const brokerBadge = React.useMemo(() => getBrokerSessionBadge(session.metadata), [session.metadata]);
-    const brokerDegradedMessages = React.useMemo(
-        () => getBrokerSessionDegradedMessages(session.metadata?.brokerDegradedFlags),
-        [session.metadata?.brokerDegradedFlags],
-    );
-    const showBrokerBanner = Boolean(brokerBadge);
 
     const input = canEdit ? (
         <AgentInput
@@ -975,59 +974,6 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
                     </Text>
                     <Ionicons name="close" size={14} color="#856404" style={{ marginLeft: 8 }} />
                 </Pressable>
-            )}
-
-            {showBrokerBanner && !(isLandscape && deviceType === 'phone') && (
-                <View
-                    style={{
-                        position: 'absolute',
-                        top: shouldShowCliWarning ? 44 : 8,
-                        alignSelf: 'center',
-                        backgroundColor: brokerDegradedMessages.length > 0 ? '#FFF3CD' : theme.colors.surfaceHigh,
-                        borderRadius: 100,
-                        paddingHorizontal: 14,
-                        paddingVertical: 7,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        zIndex: 997,
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 2 },
-                        shadowOpacity: 0.12,
-                        shadowRadius: 4,
-                        elevation: 3,
-                        maxWidth: '92%',
-                    }}
-                >
-                    <Ionicons
-                        name={brokerDegradedMessages.length > 0 ? 'warning-outline' : 'link-outline'}
-                        size={14}
-                        color={brokerDegradedMessages.length > 0 ? '#FF9500' : theme.colors.textSecondary}
-                        style={{ marginRight: 6 }}
-                    />
-                    <View style={{ flexShrink: 1 }}>
-                        <Text
-                            style={{
-                                fontSize: 12,
-                                color: brokerDegradedMessages.length > 0 ? '#856404' : theme.colors.text,
-                                fontWeight: '600',
-                            }}
-                        >
-                            {brokerDegradedMessages.length > 0 ? t('sessionInfo.brokerLimitedCapabilities') : t('sessionInfo.brokerAttached')}
-                        </Text>
-                        <Text
-                            style={{
-                                fontSize: 11,
-                                color: brokerDegradedMessages.length > 0 ? '#856404' : theme.colors.textSecondary,
-                                marginTop: 1,
-                            }}
-                            numberOfLines={2}
-                        >
-                            {brokerDegradedMessages.length > 0
-                                ? `${t('sessionInfo.brokerSource')}: ${brokerDegradedMessages.join(' • ')}`
-                                : t('sessionInfo.brokerAttachedMessage')}
-                        </Text>
-                    </View>
-                </View>
             )}
 
             {/* Main content area - no padding since header is overlay */}

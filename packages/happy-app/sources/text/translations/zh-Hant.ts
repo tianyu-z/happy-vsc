@@ -1346,6 +1346,21 @@ export const zhHant: TranslationStructure = {
         brokerSessionsUnavailable: 'Unable to load broker sessions',
         brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
         brokerAttach: 'Attach',
+        brokerProvider: {
+            claude: 'Claude',
+            codex: 'Codex',
+        },
+        brokerAttachability: {
+            attachable: '可直接附著',
+            attachable_with_degraded_capabilities: '可附著，但控制受限',
+            not_attachable: '不可附著',
+        },
+        brokerDegradedFlags: {
+            read_only_attach: '只讀附著',
+            approval_bridge_unavailable: '審批請求仍需在 VS Code 中處理',
+            attachment_bridge_unavailable: '附件仍需在 VS Code 中處理',
+            selection_context_stale: '編輯器選取上下文可能已過期',
+        },
     },
 
     repoEdit: {
