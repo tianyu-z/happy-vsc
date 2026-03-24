@@ -60,6 +60,12 @@ describe('Provider Probe Fixtures', () => {
 
       expect(fixture.reconBaseline.commands).toBeDefined();
       expectNonEmptyStringArray(fixture.reconBaseline.commands.smokeCheckCommandIds);
+      if (fixture.providerName === 'Claude' && fixture.reconBaseline.verificationState === 'unverified') {
+        // Regression guard: Claude command IDs must not look like "audited facts" until we have live recon artifacts.
+        fixture.reconBaseline.commands.smokeCheckCommandIds.forEach((commandId) => {
+          expect(commandId.startsWith('PENDING_RECON')).toBe(true);
+        });
+      }
 
       expectNonEmptyStringArray(fixture.reconBaseline.contextKeys);
 

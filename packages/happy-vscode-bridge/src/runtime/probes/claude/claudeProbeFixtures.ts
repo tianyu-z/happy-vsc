@@ -93,7 +93,7 @@ export const claudeProbeFixtures: ProviderProbeFixture = {
       remark: 'Unverified baseline. Do not assume these hook names exist until recon validates the installed extension exports.',
     },
     commands: {
-      smokeCheckCommandIds: ['claude-code.open', 'claude-code.acceptDiff', 'claude-code.rejectDiff'],
+      smokeCheckCommandIds: ['PENDING_RECON: Claude Code smoke-check command ids (unverified baseline)'],
     },
     contextKeys: ['PENDING_RECON: context keys used for live-session detection (unverified baseline)'],
     storagePath: [
