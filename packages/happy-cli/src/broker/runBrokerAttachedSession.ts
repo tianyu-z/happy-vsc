@@ -51,6 +51,12 @@ export async function runBrokerAttachedSession(options: RunBrokerAttachedSession
     brokerSessionId: snapshot.brokerSessionId,
     brokerCapabilities: snapshot.capabilities,
     brokerDegradedFlags: snapshot.degradedFlags,
+    brokerDesiredMode: snapshot.desiredMode,
+    brokerEffectiveMode: snapshot.effectiveMode,
+    brokerModeReason: snapshot.modeReason,
+    brokerCompatibility: snapshot.compatibility,
+    brokerProviderExtension: snapshot.providerExtension,
+    brokerProbeHealth: snapshot.probeHealth,
   });
 
   const response = await api.getOrCreateSession({

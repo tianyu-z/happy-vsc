@@ -1,11 +1,16 @@
 import WebSocket from 'ws';
+import { z } from 'zod';
 
 import {
+  brokerAttachmentRefSchema,
+  brokerDesiredModeSchema,
   brokerDiscoveredSessionSchema,
   brokerSnapshotSchema,
+  type BrokerAttachmentRef,
+  type BrokerDesiredMode,
   type BrokerDiscoveredSession,
   type BrokerSnapshot,
-} from 'happy-wire';
+} from './brokerTypes';
 
 type RpcSuccess = {
   id: string;
@@ -35,6 +40,28 @@ export class BrokerClient {
   async attachSession(brokerSessionId: string): Promise<BrokerSnapshot | null> {
     const result = await this.request('attachSession', { brokerSessionId });
     return brokerSnapshotSchema.nullable().parse(result);
+  }
+
+  async sendMessage(brokerSessionId: string, text: string): Promise<boolean> {
+    const result = await this.request('sendMessage', { brokerSessionId, text });
+    return z.boolean().parse(result);
+  }
+
+  async listAttachments(brokerSessionId: string): Promise<BrokerAttachmentRef[]> {
+    const result = await this.request('listAttachments', { brokerSessionId });
+    return brokerAttachmentRefSchema.array().parse(result);
+  }
+
+  async setSessionDesiredMode(
+    brokerSessionId: string,
+    desiredMode: BrokerDesiredMode,
+  ): Promise<BrokerDiscoveredSession> {
+    brokerDesiredModeSchema.parse(desiredMode);
+    const result = await this.request('setSessionDesiredMode', {
+      brokerSessionId,
+      desiredMode,
+    });
+    return brokerDiscoveredSessionSchema.parse(result);
   }
 
   private async request(method: string, params: unknown): Promise<unknown> {

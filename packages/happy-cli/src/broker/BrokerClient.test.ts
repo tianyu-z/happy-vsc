@@ -15,10 +15,24 @@ type RpcRequest = {
   params: unknown;
 };
 
-async function createBrokerRpcServer(handlers: {
-  discoverSessions: () => unknown;
-  attachSession: (brokerSessionId: string) => unknown;
-}) {
+function makeRuntimeMetadata() {
+  return {
+    desiredMode: 'runtime_preferred',
+    effectiveMode: 'runtime',
+    modeReason: 'runtime_ready',
+    compatibility: 'supported',
+    providerExtension: {
+      id: 'anthropic.claude-code',
+      version: '1.0.0',
+    },
+    probeHealth: {
+      runtime: 'ready',
+      storage: 'ready',
+    },
+  };
+}
+
+async function createBrokerRpcServer(handlers: Record<string, (params: any) => unknown>) {
   const httpServer = createServer();
   const wsServer = new WebSocketServer({ server: httpServer });
   const calls: RpcRequest[] = [];
@@ -28,16 +42,9 @@ async function createBrokerRpcServer(handlers: {
       const request = JSON.parse(String(raw)) as RpcRequest;
       calls.push(request);
 
-      if (request.method === 'discoverSessions') {
-        socket.send(JSON.stringify({ id: request.id, result: handlers.discoverSessions() }));
-        return;
-      }
-
-      if (request.method === 'attachSession') {
-        const params = request.params as { brokerSessionId: string };
-        socket.send(
-          JSON.stringify({ id: request.id, result: handlers.attachSession(params.brokerSessionId) }),
-        );
+      const handler = handlers[request.method];
+      if (handler) {
+        socket.send(JSON.stringify({ id: request.id, result: handler(request.params) }));
         return;
       }
 
@@ -120,6 +127,7 @@ describe('BrokerClient', () => {
           attachability: 'attachable',
           capabilities: ['sendUserMessage'],
           degradedFlags: [],
+          ...makeRuntimeMetadata(),
         },
       ],
       attachSession: () => null,
@@ -130,6 +138,8 @@ describe('BrokerClient', () => {
       await expect(client.discoverSessions()).resolves.toMatchObject([
         {
           brokerSessionId: 'broker-sess-1',
+          desiredMode: 'runtime_preferred',
+          effectiveMode: 'runtime',
         },
       ]);
       expect(server.calls).toEqual(
@@ -147,12 +157,13 @@ describe('BrokerClient', () => {
   it('calls attachSession over broker ws/json-rpc', async () => {
     const server = await createBrokerRpcServer({
       discoverSessions: () => [],
-      attachSession: (brokerSessionId) => ({
-        brokerSessionId,
+      attachSession: (params) => ({
+        brokerSessionId: params.brokerSessionId,
         provider: 'codex',
         latestSeq: 4,
         capabilities: ['sendUserMessage'],
         degradedFlags: ['missing_editor_context'],
+        ...makeRuntimeMetadata(),
       }),
     });
 
@@ -161,6 +172,7 @@ describe('BrokerClient', () => {
       await expect(client.attachSession('broker-sess-1')).resolves.toMatchObject({
         latestSeq: 4,
         degradedFlags: ['missing_editor_context'],
+        desiredMode: 'runtime_preferred',
       });
       expect(server.calls).toEqual(
         expect.arrayContaining([
@@ -238,6 +250,84 @@ describe('BrokerClient', () => {
 
       await new Promise<void>((resolve) => wsServer.close(() => resolve()));
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    }
+  });
+
+  it('calls full-control broker rpc helpers and parses runtime metadata', async () => {
+    const server = await createBrokerRpcServer({
+      discoverSessions: () => [],
+      attachSession: () => null,
+      sendMessage: () => true,
+      listAttachments: () => [
+        {
+          id: 'artifact-1',
+          kind: 'image',
+          label: 'preview.png',
+        },
+      ],
+      setSessionDesiredMode: (params) => ({
+        brokerSessionId: params.brokerSessionId,
+        provider: 'claude',
+        title: 'Attach me',
+        attachability: 'attachable_with_degraded_capabilities',
+        capabilities: ['sendUserMessage'],
+        degradedFlags: ['read_only_attach'],
+        desiredMode: params.desiredMode,
+        effectiveMode: 'storage',
+        modeReason: 'storage_preferred_selected',
+        compatibility: 'supported',
+        providerExtension: {
+          id: 'anthropic.claude-code',
+          version: '1.0.0',
+        },
+        probeHealth: {
+          runtime: 'degraded',
+          storage: 'ready',
+        },
+      }),
+    });
+
+    try {
+      const client = new BrokerClient(server.url);
+      await expect(client.sendMessage('broker-sess-1', 'continue')).resolves.toBe(true);
+      await expect(client.listAttachments('broker-sess-1')).resolves.toMatchObject([
+        {
+          id: 'artifact-1',
+          kind: 'image',
+        },
+      ]);
+      await expect(
+        client.setSessionDesiredMode('broker-sess-1', 'storage_preferred'),
+      ).resolves.toMatchObject({
+        desiredMode: 'storage_preferred',
+        effectiveMode: 'storage',
+      });
+      expect(server.calls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            method: 'sendMessage',
+            params: {
+              brokerSessionId: 'broker-sess-1',
+              text: 'continue',
+            },
+          }),
+          expect.objectContaining({
+            method: 'listAttachments',
+            params: {
+              brokerSessionId: 'broker-sess-1',
+            },
+          }),
+          expect.objectContaining({
+            method: 'setSessionDesiredMode',
+            params: {
+              brokerSessionId: 'broker-sess-1',
+              desiredMode: 'storage_preferred',
+            },
+          }),
+        ]),
+      );
+    } finally {
+      await server.close();
     }
   });
 });

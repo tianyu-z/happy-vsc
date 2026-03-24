@@ -38,6 +38,12 @@ export interface CreateSessionMetadataOptions {
     brokerSessionId?: string;
     brokerCapabilities?: string[];
     brokerDegradedFlags?: string[];
+    brokerDesiredMode?: Metadata['brokerDesiredMode'];
+    brokerEffectiveMode?: Metadata['brokerEffectiveMode'];
+    brokerModeReason?: Metadata['brokerModeReason'];
+    brokerCompatibility?: Metadata['brokerCompatibility'];
+    brokerProviderExtension?: Metadata['brokerProviderExtension'];
+    brokerProbeHealth?: Metadata['brokerProbeHealth'];
 }
 
 /**
@@ -169,6 +175,12 @@ export function createSessionMetadata(opts: CreateSessionMetadataOptions): Sessi
             brokerSessionId: opts.brokerSessionId,
             brokerCapabilities: opts.brokerCapabilities,
             brokerDegradedFlags: opts.brokerDegradedFlags,
+            brokerDesiredMode: opts.brokerDesiredMode,
+            brokerEffectiveMode: opts.brokerEffectiveMode,
+            brokerModeReason: opts.brokerModeReason,
+            brokerCompatibility: opts.brokerCompatibility,
+            brokerProviderExtension: opts.brokerProviderExtension,
+            brokerProbeHealth: opts.brokerProbeHealth,
         } : {}),
         // Worktree metadata: env vars from daemon take priority, otherwise detect via git
         ...detectWorktreeMetadata(),

@@ -56,12 +56,27 @@ describe('createSessionMetadata broker projection', () => {
       brokerSessionId: 'broker-sess-1',
       brokerCapabilities: ['sendUserMessage'],
       brokerDegradedFlags: ['missing_editor_context'],
+      brokerDesiredMode: 'runtime_preferred',
+      brokerEffectiveMode: 'runtime',
+      brokerModeReason: 'runtime_ready',
+      brokerCompatibility: 'supported',
+      brokerProviderExtension: {
+        id: 'anthropic.claude-code',
+        version: '1.0.0',
+      },
+      brokerProbeHealth: {
+        runtime: 'ready',
+        storage: 'ready',
+      },
     });
 
     expect(metadata.sessionSource).toBe('broker_attached');
     expect(metadata.brokerSessionId).toBe('broker-sess-1');
     expect(metadata.brokerCapabilities).toEqual(['sendUserMessage']);
     expect(metadata.brokerDegradedFlags).toEqual(['missing_editor_context']);
+    expect(metadata.brokerDesiredMode).toBe('runtime_preferred');
+    expect(metadata.brokerEffectiveMode).toBe('runtime');
+    expect(metadata.brokerModeReason).toBe('runtime_ready');
   });
 });
 
@@ -74,6 +89,18 @@ describe('runBrokerAttachedSession', () => {
       latestSeq: 5,
       capabilities: ['sendUserMessage', 'interrupt'],
       degradedFlags: ['missing_editor_context'],
+      desiredMode: 'runtime_preferred',
+      effectiveMode: 'runtime',
+      modeReason: 'runtime_ready',
+      compatibility: 'supported',
+      providerExtension: {
+        id: 'anthropic.claude-code',
+        version: '1.0.0',
+      },
+      probeHealth: {
+        runtime: 'ready',
+        storage: 'ready',
+      },
     });
 
     const getOrCreateMachine = vi.fn().mockResolvedValue({});
@@ -106,6 +133,10 @@ describe('runBrokerAttachedSession', () => {
           brokerSessionId: 'broker-sess-1',
           brokerCapabilities: ['sendUserMessage', 'interrupt'],
           brokerDegradedFlags: ['missing_editor_context'],
+          brokerDesiredMode: 'runtime_preferred',
+          brokerEffectiveMode: 'runtime',
+          brokerModeReason: 'runtime_ready',
+          brokerCompatibility: 'supported',
         }),
       }),
     );
