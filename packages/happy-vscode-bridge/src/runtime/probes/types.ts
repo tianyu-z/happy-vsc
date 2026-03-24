@@ -1,5 +1,6 @@
 import type { BrokerProvider } from 'happy-wire';
 
+import type { BridgeAttachmentRef } from '../../broker/bridgeTypes';
 import type {
   BrokerEditorContext,
   ProviderEvent,
@@ -41,6 +42,7 @@ export interface RuntimeProbe {
     ref: string,
     onEvent: (event: ProviderEvent) => void,
   ): Promise<() => void>;
+  listAttachments?(ref: string): Promise<BridgeAttachmentRef[]>;
   sendMessage?(ref: string, text: string): Promise<void>;
   interrupt?(ref: string, reason: string): Promise<void>;
   resolveApproval?(

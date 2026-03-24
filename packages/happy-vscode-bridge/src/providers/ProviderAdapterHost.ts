@@ -1,5 +1,6 @@
 import type { BrokerProvider } from 'happy-wire';
 
+import type { BridgeAttachmentRef } from '../broker/bridgeTypes';
 import type {
   ApprovalIntent,
   BrokerEditorContext,
@@ -177,6 +178,16 @@ export class ProviderAdapterHost {
     }
 
     return adapter.captureEditorContext(binding.providerSessionRef);
+  }
+
+  async listAttachments(brokerSessionId: string): Promise<BridgeAttachmentRef[]> {
+    const { adapter, binding } = this.getAdapterAndBinding(brokerSessionId);
+
+    if (!adapter.listAttachments) {
+      return [];
+    }
+
+    return adapter.listAttachments(binding.providerSessionRef);
   }
 
   async watchEvents(

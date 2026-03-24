@@ -1,5 +1,7 @@
 import type { BrokerAttachability, BrokerProvider } from 'happy-wire';
 
+import type { BridgeAttachmentRef } from '../broker/bridgeTypes';
+
 export type BrokerSelectionRange = {
   startLine: number;
   startCharacter: number;
@@ -81,6 +83,7 @@ export interface ProviderAdapter {
   sendUserMessage(intent: SendUserMessageIntent): Promise<void>;
   interrupt(intent: InterruptIntent): Promise<void>;
   resolveApproval(intent: ApprovalIntent): Promise<void>;
+  listAttachments?(ref: string): Promise<BridgeAttachmentRef[]>;
   captureEditorContext?(ref: string): Promise<BrokerEditorContext>;
   watchEvents?(ref: string, onEvent: (event: ProviderEvent) => void): Promise<() => void> | (() => void);
   getHealth?(ref: string): Promise<ProviderAdapterHealth> | ProviderAdapterHealth;

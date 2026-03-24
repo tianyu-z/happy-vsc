@@ -69,6 +69,17 @@ export class UnifiedSessionRuntimeStore {
     );
   }
 
+  pruneExcept(providerSessionKeys: Set<string>): void {
+    for (const [providerSessionKey, record] of this.byProviderSessionKey.entries()) {
+      if (providerSessionKeys.has(providerSessionKey)) {
+        continue;
+      }
+
+      this.byProviderSessionKey.delete(providerSessionKey);
+      this.byBrokerSessionId.delete(record.brokerSessionId);
+    }
+  }
+
   private toDiscoveredSession(
     record: UnifiedSessionRecord,
   ): BridgeBrokerDiscoveredSession {

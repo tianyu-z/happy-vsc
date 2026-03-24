@@ -1,7 +1,15 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import WebSocket, { WebSocketServer } from 'ws';
 
-import type { BrokerDiscoveredSession, BrokerSnapshot } from 'happy-wire';
+import type {
+  BridgeAttachmentRef,
+  BridgeCaptureEditorContextResult,
+  BridgeDesiredMode,
+} from './bridgeTypes';
+import type {
+  BridgeBrokerDiscoveredSession,
+  BridgeBrokerSnapshot,
+} from '../runtime/types';
 
 import type { BrokerManifestStore } from './BrokerManifestStore';
 import {
@@ -13,8 +21,33 @@ import {
 import type { BrokerLogEntry, SharedSessionStore } from './SharedSessionStore';
 
 export type BrokerAdapterHost = {
-  discover(): Promise<BrokerDiscoveredSession[]> | BrokerDiscoveredSession[];
-  attach(brokerSessionId: string): Promise<BrokerSnapshot | null> | BrokerSnapshot | null;
+  discover():
+    | Promise<BridgeBrokerDiscoveredSession[]>
+    | BridgeBrokerDiscoveredSession[];
+  attach(
+    brokerSessionId: string,
+  ): Promise<BridgeBrokerSnapshot | null> | BridgeBrokerSnapshot | null;
+  sendMessage?(brokerSessionId: string, text: string): Promise<boolean> | boolean;
+  interruptSession?(brokerSessionId: string, reason: string): Promise<boolean> | boolean;
+  resolveApproval?(
+    brokerSessionId: string,
+    approvalId: string,
+    decision: 'approve' | 'deny',
+  ): Promise<boolean> | boolean;
+  captureEditorContext?(
+    brokerSessionId: string,
+  ):
+    | Promise<BridgeCaptureEditorContextResult | null>
+    | BridgeCaptureEditorContextResult
+    | null;
+  listAttachments?(
+    brokerSessionId: string,
+  ): Promise<BridgeAttachmentRef[]> | BridgeAttachmentRef[];
+  setSessionDesiredMode?(
+    brokerSessionId: string,
+    desiredMode: BridgeDesiredMode,
+  ): Promise<BridgeBrokerDiscoveredSession> | BridgeBrokerDiscoveredSession;
+  subscribeEvents?(brokerSessionId: string): Promise<boolean> | boolean;
 };
 
 export type BrokerServerOptions = {
@@ -63,14 +96,156 @@ export class BrokerServer {
           }
 
           if (message.method === 'attachSession') {
-            const brokerSessionId = (message.params as { brokerSessionId: string }).brokerSessionId;
+            const brokerSessionId = (
+              message.params as { brokerSessionId?: string } | undefined
+            )?.brokerSessionId;
+            if (!brokerSessionId) {
+              throw new Error('attachSession requires brokerSessionId');
+            }
             const result = await options.adapterHost.attach(brokerSessionId);
             socket.send(JSON.stringify(createBrokerRpcSuccess(message.id, result)));
             return;
           }
 
+          if (message.method === 'sendMessage') {
+            if (!options.adapterHost.sendMessage) {
+              throw new Error('sendMessage is not supported by this broker');
+            }
+
+            const params = message.params as
+              | { brokerSessionId?: string; text?: string }
+              | undefined;
+            if (!params?.brokerSessionId || typeof params.text !== 'string') {
+              throw new Error('sendMessage requires brokerSessionId and text');
+            }
+            const { brokerSessionId, text } = params;
+            const result = await options.adapterHost.sendMessage(brokerSessionId, text);
+            socket.send(
+              JSON.stringify(createBrokerRpcSuccess(message.id, result ?? true)),
+            );
+            return;
+          }
+
+          if (message.method === 'interruptSession') {
+            if (!options.adapterHost.interruptSession) {
+              throw new Error('interruptSession is not supported by this broker');
+            }
+
+            const params = message.params as
+              | { brokerSessionId?: string; reason?: string }
+              | undefined;
+            if (!params?.brokerSessionId || typeof params.reason !== 'string') {
+              throw new Error('interruptSession requires brokerSessionId and reason');
+            }
+            const { brokerSessionId, reason } = params;
+            const result = await options.adapterHost.interruptSession(
+              brokerSessionId,
+              reason,
+            );
+            socket.send(
+              JSON.stringify(createBrokerRpcSuccess(message.id, result ?? true)),
+            );
+            return;
+          }
+
+          if (message.method === 'resolveApproval') {
+            if (!options.adapterHost.resolveApproval) {
+              throw new Error('resolveApproval is not supported by this broker');
+            }
+
+            const params = message.params as
+              | {
+                  brokerSessionId?: string;
+                  approvalId?: string;
+                  decision?: 'approve' | 'deny';
+                }
+              | undefined;
+            if (
+              !params?.brokerSessionId ||
+              !params.approvalId ||
+              (params.decision !== 'approve' && params.decision !== 'deny')
+            ) {
+              throw new Error(
+                'resolveApproval requires brokerSessionId, approvalId, and decision',
+              );
+            }
+            const { brokerSessionId, approvalId, decision } = params;
+            const result = await options.adapterHost.resolveApproval(
+              brokerSessionId,
+              approvalId,
+              decision,
+            );
+            socket.send(
+              JSON.stringify(createBrokerRpcSuccess(message.id, result ?? true)),
+            );
+            return;
+          }
+
+          if (message.method === 'captureEditorContext') {
+            const brokerSessionId = (
+              message.params as { brokerSessionId?: string } | undefined
+            )?.brokerSessionId;
+            if (!brokerSessionId) {
+              throw new Error('captureEditorContext requires brokerSessionId');
+            }
+            const result = options.adapterHost.captureEditorContext
+              ? await options.adapterHost.captureEditorContext(brokerSessionId)
+              : null;
+            socket.send(JSON.stringify(createBrokerRpcSuccess(message.id, result)));
+            return;
+          }
+
+          if (message.method === 'listAttachments') {
+            const brokerSessionId = (
+              message.params as { brokerSessionId?: string } | undefined
+            )?.brokerSessionId;
+            if (!brokerSessionId) {
+              throw new Error('listAttachments requires brokerSessionId');
+            }
+            const result = options.adapterHost.listAttachments
+              ? await options.adapterHost.listAttachments(brokerSessionId)
+              : [];
+            socket.send(JSON.stringify(createBrokerRpcSuccess(message.id, result)));
+            return;
+          }
+
+          if (message.method === 'setSessionDesiredMode') {
+            if (!options.adapterHost.setSessionDesiredMode) {
+              throw new Error('setSessionDesiredMode is not supported by this broker');
+            }
+
+            const params = message.params as
+              | {
+                  brokerSessionId?: string;
+                  desiredMode?: BridgeDesiredMode;
+                }
+              | undefined;
+            if (
+              !params?.brokerSessionId ||
+              (params.desiredMode !== 'runtime_preferred' &&
+                params.desiredMode !== 'storage_preferred')
+            ) {
+              throw new Error(
+                'setSessionDesiredMode requires brokerSessionId and desiredMode',
+              );
+            }
+            const { brokerSessionId, desiredMode } = params;
+            const result = await options.adapterHost.setSessionDesiredMode(
+              brokerSessionId,
+              desiredMode,
+            );
+            socket.send(JSON.stringify(createBrokerRpcSuccess(message.id, result)));
+            return;
+          }
+
           if (message.method === 'subscribeEvents') {
-            const brokerSessionId = (message.params as { brokerSessionId: string }).brokerSessionId;
+            const brokerSessionId = (
+              message.params as { brokerSessionId?: string } | undefined
+            )?.brokerSessionId;
+            if (!brokerSessionId) {
+              throw new Error('subscribeEvents requires brokerSessionId');
+            }
+            await options.adapterHost.subscribeEvents?.(brokerSessionId);
             const unsubscribe = options.store.subscribe((entry: BrokerLogEntry) => {
               if (entry.sessionId !== brokerSessionId || socket.readyState !== WebSocket.OPEN) {
                 return;

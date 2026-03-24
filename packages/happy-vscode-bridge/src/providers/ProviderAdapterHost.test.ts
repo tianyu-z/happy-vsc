@@ -229,4 +229,54 @@ describe('ProviderAdapterHost', () => {
     });
     await expect(host.attach('session-stale')).rejects.toThrow('Unknown broker session');
   });
+
+  it('routes attachment discovery through the mapped adapter session', async () => {
+    const listAttachments = vi.fn(async () => [
+      {
+        id: 'artifact-1',
+        kind: 'image',
+        label: 'preview.png',
+      },
+    ]);
+
+    const adapter: ProviderAdapter = {
+      discover: async () => [
+        {
+          brokerSessionId: 'session-attachments',
+          providerSessionRef: 'provider-session-attachments',
+          provider: 'codex',
+          title: 'Session Attachments',
+          attachability: 'attachable',
+          capabilities: ['sendUserMessage'],
+          degradedFlags: [],
+        },
+      ],
+      attach: async () => ({
+        brokerSessionId: 'session-attachments',
+        providerSessionRef: 'provider-session-attachments',
+        provider: 'codex',
+        latestSeq: 1,
+        capabilities: ['sendUserMessage'],
+        degradedFlags: [],
+      }),
+      sendUserMessage: async () => {},
+      interrupt: async () => {},
+      resolveApproval: async () => {},
+      listAttachments,
+    };
+
+    const host = new ProviderAdapterHost({
+      codex: adapter,
+    });
+
+    await host.discover();
+
+    await expect(host.listAttachments('session-attachments')).resolves.toMatchObject([
+      {
+        id: 'artifact-1',
+        kind: 'image',
+      },
+    ]);
+    expect(listAttachments).toHaveBeenCalledWith('provider-session-attachments');
+  });
 });

@@ -1,19 +1,19 @@
+import type { BridgeBrokerEvent } from './bridgeTypes';
 import type {
-  BrokerDiscoveredSession,
-  BrokerEvent,
-  BrokerSnapshot,
-} from 'happy-wire';
+  BridgeBrokerDiscoveredSession,
+  BridgeBrokerSnapshot,
+} from '../runtime/types';
 
 export type BrokerLogEntry = {
   seq: number;
   at: number;
   sessionId: string;
-  event: BrokerEvent;
+  event: BridgeBrokerEvent;
 };
 
 type SessionProjection = {
-  snapshot?: BrokerSnapshot;
-  discovered?: BrokerDiscoveredSession;
+  snapshot?: BridgeBrokerSnapshot;
+  discovered?: BridgeBrokerDiscoveredSession;
 };
 
 export class SharedSessionStore {
@@ -22,7 +22,7 @@ export class SharedSessionStore {
   private projections = new Map<string, SessionProjection>();
   private subscribers = new Set<(entry: BrokerLogEntry) => void>();
 
-  append(sessionId: string, event: BrokerEvent): BrokerLogEntry {
+  append(sessionId: string, event: BridgeBrokerEvent): BrokerLogEntry {
     const entry: BrokerLogEntry = {
       seq: ++this.seq,
       at: Date.now(),
@@ -37,21 +37,22 @@ export class SharedSessionStore {
     return entry;
   }
 
-  getSnapshot(sessionId: string): BrokerSnapshot | undefined {
+  getSnapshot(sessionId: string): BridgeBrokerSnapshot | undefined {
     return this.projections.get(sessionId)?.snapshot;
   }
 
-  listSnapshots(): BrokerSnapshot[] {
+  listSnapshots(): BridgeBrokerSnapshot[] {
     return Array.from(this.projections.values())
       .map((projection) => projection.snapshot)
-      .filter((snapshot): snapshot is BrokerSnapshot => Boolean(snapshot));
+      .filter((snapshot): snapshot is BridgeBrokerSnapshot => Boolean(snapshot));
   }
 
-  listDiscoveredSessions(): BrokerDiscoveredSession[] {
+  listDiscoveredSessions(): BridgeBrokerDiscoveredSession[] {
     return Array.from(this.projections.values())
       .map((projection) => projection.discovered)
       .filter(
-        (discovered): discovered is BrokerDiscoveredSession => Boolean(discovered),
+        (discovered): discovered is BridgeBrokerDiscoveredSession =>
+          Boolean(discovered),
       );
   }
 
