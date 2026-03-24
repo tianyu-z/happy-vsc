@@ -19,6 +19,28 @@ Out of scope for this phase:
 - Multi-client concurrent control
 - Gemini
 
+## Provider Evidence Baseline (Recon Fixtures)
+
+The companion extension intentionally avoids guessing private provider internals (entrypoints, hidden commands, storage layouts). Before implementing or upgrading any provider RuntimeProbe/StorageProbe, capture recon evidence in stable fixtures and keep it versioned in-repo.
+
+Full-control evidence baseline keys (per provider):
+
+- `extensionId`
+- `extensionVersion`
+- `exportsShape`
+- `commands`
+- `contextKeys`
+- `storagePath`
+- `workspaceBinding`
+
+Failure policy if the evidence is missing or unverified:
+
+- `compatibility=unknown`
+- `attachability=attachable_with_degraded_capabilities`
+- degraded flags include `runtime_probe_unverified`
+
+Operationally: if you see `runtime_probe_unverified`, treat it as "needs recon". Confirm the official extension version and runtime markers, then update the recon fixtures before attempting full-control support.
+
 ## Manual Verification Checklist
 
 Run this checklist before calling the flow production-ready:
