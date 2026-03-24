@@ -95,6 +95,7 @@ If attach succeeds with degraded capabilities, Happy should still show the sessi
 
 Current degraded flags:
 
+- `runtime_probe_unverified`: provider recon evidence is still an unverified baseline; attach is allowed but capabilities remain degraded until recon completes.
 - `read_only_attach`: Happy is attached in read-only mode.
 - `interrupt_bridge_unavailable`: interrupts stay in VS Code.
 - `approval_bridge_unavailable`: approval requests stay in VS Code.

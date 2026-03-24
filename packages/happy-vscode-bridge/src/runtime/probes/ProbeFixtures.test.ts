@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'vitest';
 
+import { readFileSync } from 'node:fs';
+
 import { claudeProbeFixtures, readFixtureChecklist } from './claude/claudeProbeFixtures';
 import { codexProbeFixtures } from './codex/codexProbeFixtures';
 
@@ -24,6 +26,12 @@ const requiredReconBaselineKeys = [
   'workspaceBinding',
 ] as const;
 
+const requiredReconBaselineTopLevelKeys = [
+  'verificationState',
+  'sources',
+  ...requiredReconBaselineKeys,
+] as const;
+
 describe('Provider Probe Fixtures', () => {
   test('document the provider evidence required for full-control (as an unverified recon baseline)', () => {
     const providers = [
@@ -40,6 +48,11 @@ describe('Provider Probe Fixtures', () => {
       requiredReconBaselineKeys.forEach((field) => {
         expect(fixture.reconBaseline).toHaveProperty(field);
       });
+
+      // Lock the recon baseline schema: no silent additions without review.
+      expect(Object.keys(fixture.reconBaseline).sort()).toEqual(
+        [...requiredReconBaselineTopLevelKeys].sort(),
+      );
 
       // Prevent fixtures from degrading into empty placeholders while still satisfying shape checks.
       expect(fixture.reconBaseline.verificationState).toBe('unverified');
@@ -97,6 +110,17 @@ describe('Provider Probe Fixtures', () => {
     expect(actual).toEqual(expectedSorted);
   });
 
+  test('Codex recon baseline must cite official provider docs for command ids', () => {
+    expect(codexProbeFixtures.reconBaseline.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'provider_docs',
+          ref: 'https://developers.openai.com/codex/ide/commands',
+        }),
+      ]),
+    );
+  });
+
   test('codifies the stop condition for unverified probes (do not guess provider internals)', () => {
     const providers = [claudeProbeFixtures, codexProbeFixtures];
 
@@ -107,5 +131,13 @@ describe('Provider Probe Fixtures', () => {
         attachability: 'attachable_with_degraded_capabilities',
       });
     });
+  });
+
+  test('operator guide degraded flag list includes runtime_probe_unverified', () => {
+    const operatorGuidePath = new URL('../../../../../docs/vscode-companion-broker.md', import.meta.url);
+    const operatorGuide = readFileSync(operatorGuidePath, 'utf8');
+
+    const degradedSection = operatorGuide.split('Current degraded flags:')[1]?.split('Treat degraded mode')[0] ?? '';
+    expect(degradedSection).toMatch(/`runtime_probe_unverified`/);
   });
 });
