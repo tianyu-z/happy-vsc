@@ -57,68 +57,74 @@ describe('broker protocol', () => {
   });
 
   it('parses event: session.message.delta', () => {
-    expect(
-      brokerEventSchema.parse({
-        type: 'session.message.delta',
-        brokerSessionId: 'sess_123',
-        role: 'assistant',
-        text: 'Hello',
-      }).type,
-    ).toBe('session.message.delta');
+    const evt = brokerEventSchema.parse({
+      type: 'session.message.delta',
+      brokerSessionId: 'sess_123',
+      payload: { role: 'assistant', text: 'Hello' },
+    });
+    if (evt.type !== 'session.message.delta') throw new Error('unexpected event type');
+    expect(evt.payload.role).toBe('assistant');
+    expect(evt.payload.text).toBe('Hello');
   });
 
   it('parses event: session.run.status', () => {
     const evt = brokerEventSchema.parse({
       type: 'session.run.status',
       brokerSessionId: 'sess_123',
-      status: 'waiting_approval',
-      reason: 'needs_user_approval',
+      payload: {
+        status: 'waiting_approval',
+        reason: 'needs_user_approval',
+      },
     });
     if (evt.type !== 'session.run.status') throw new Error('unexpected event type');
-    expect(evt.status).toBe('waiting_approval');
+    expect(evt.payload.status).toBe('waiting_approval');
+    expect(evt.payload.reason).toBe('needs_user_approval');
   });
 
   it('parses event: session.approval.requested', () => {
     const evt = brokerEventSchema.parse({
       type: 'session.approval.requested',
       brokerSessionId: 'sess_123',
-      approvalId: 'appr_1',
-      label: 'Apply patch?',
-      description: 'Wants to edit files',
+      payload: {
+        approvalId: 'appr_1',
+        label: 'Apply patch?',
+        description: 'Wants to edit files',
+      },
     });
     if (evt.type !== 'session.approval.requested') throw new Error('unexpected event type');
-    expect(evt.approvalId).toBe('appr_1');
+    expect(evt.payload.approvalId).toBe('appr_1');
   });
 
   it('parses event: session.approval.dismissed', () => {
-    expect(
-      brokerEventSchema.parse({
-        type: 'session.approval.dismissed',
-        brokerSessionId: 'sess_123',
-        approvalId: 'appr_1',
-      }).type,
-    ).toBe('session.approval.dismissed');
+    const evt = brokerEventSchema.parse({
+      type: 'session.approval.dismissed',
+      brokerSessionId: 'sess_123',
+      payload: { approvalId: 'appr_1' },
+    });
+    if (evt.type !== 'session.approval.dismissed') throw new Error('unexpected event type');
+    expect(evt.payload.approvalId).toBe('appr_1');
   });
 
   it('parses event: session.interrupt', () => {
     const evt = brokerEventSchema.parse({
       type: 'session.interrupt',
       brokerSessionId: 'sess_123',
-      outcome: 'accepted',
-      reason: 'user_requested',
+      payload: { outcome: 'accepted', reason: 'user_requested' },
     });
     if (evt.type !== 'session.interrupt') throw new Error('unexpected event type');
-    expect(evt.outcome).toBe('accepted');
+    expect(evt.payload.outcome).toBe('accepted');
+    expect(evt.payload.reason).toBe('user_requested');
   });
 
   it('parses event: session.attachment.added', () => {
     const evt = brokerEventSchema.parse({
       type: 'session.attachment.added',
       brokerSessionId: 'sess_123',
-      attachment: { id: 'att_1', kind: 'file', label: 'foo.ts' },
+      payload: { attachment: { id: 'att_1', kind: 'image', label: 'foo.png' } },
     });
     if (evt.type !== 'session.attachment.added') throw new Error('unexpected event type');
-    expect(evt.attachment.id).toBe('att_1');
+    expect(evt.payload.attachment.id).toBe('att_1');
+    expect(evt.payload.attachment.kind).toBe('image');
   });
 
   it('parses a broker event envelope: session.snapshot', () => {
@@ -157,47 +163,106 @@ describe('broker protocol', () => {
       'subscribeEvents',
     ] as const;
     for (const m of methods) {
-      expect(brokerRpcContract[m].request).toBeDefined();
-      expect(brokerRpcContract[m].response).toBeDefined();
+      expect(brokerRpcContract[m].params).toBeDefined();
+      expect(brokerRpcContract[m].result).toBeDefined();
     }
 
     const send = brokerSendMessageIntentSchema.parse({
       brokerSessionId: 'sess_123',
       text: 'Hi',
     });
-    brokerRpcContract.sendMessage.request.parse(send);
+    brokerRpcContract.sendMessage.params.parse(send);
+    brokerRpcContract.sendMessage.result.parse(true);
 
     const interrupt = brokerInterruptIntentSchema.parse({
       brokerSessionId: 'sess_123',
       reason: 'user_clicked_stop',
     });
-    brokerRpcContract.interruptSession.request.parse(interrupt);
+    brokerRpcContract.interruptSession.params.parse(interrupt);
+    brokerRpcContract.interruptSession.result.parse(true);
 
     const resolve = brokerResolveApprovalIntentSchema.parse({
       brokerSessionId: 'sess_123',
       approvalId: 'appr_1',
       decision: 'approve',
     });
-    brokerRpcContract.resolveApproval.request.parse(resolve);
+    brokerRpcContract.resolveApproval.params.parse(resolve);
+    brokerRpcContract.resolveApproval.result.parse(true);
 
     const setMode = brokerSetDesiredModeIntentSchema.parse({
       brokerSessionId: 'sess_123',
       desiredMode: 'runtime_preferred',
     });
-    brokerRpcContract.setSessionDesiredMode.request.parse(setMode);
+    brokerRpcContract.setSessionDesiredMode.params.parse(setMode);
 
-    brokerRpcContract.captureEditorContext.response.parse({
+    brokerRpcContract.attachSession.params.parse({ brokerSessionId: 'sess_123' });
+    brokerRpcContract.attachSession.result.parse(null);
+    brokerRpcContract.attachSession.result.parse({
+      brokerSessionId: 'sess_123',
+      provider: 'codex',
+      latestSeq: 42,
+      capabilities: ['sendUserMessage'],
+      degradedFlags: [],
+      desiredMode: 'runtime_preferred',
+      effectiveMode: 'runtime',
+      modeReason: 'mode.selected.by.default',
+      compatibility: 'supported',
+      providerExtension: { id: 'vscode-companion', version: '0.1.0' },
+      probeHealth: { runtime: 'ready', storage: 'ready' },
+    });
+
+    brokerRpcContract.discoverSessions.params.parse({});
+    brokerRpcContract.discoverSessions.result.parse([
+      {
+        brokerSessionId: 'sess_123',
+        provider: 'claude',
+        title: 'Attach me',
+        attachability: 'attachable',
+        capabilities: ['sendUserMessage'],
+        degradedFlags: [],
+        desiredMode: 'runtime_preferred',
+        effectiveMode: 'runtime',
+        modeReason: 'mode.selected.by.default',
+        compatibility: 'supported',
+        providerExtension: { id: 'vscode-companion', version: '0.1.0' },
+        probeHealth: { runtime: 'ready', storage: 'ready' },
+      },
+    ]);
+
+    brokerRpcContract.captureEditorContext.params.parse({ brokerSessionId: 'sess_123' });
+    brokerRpcContract.captureEditorContext.result.parse(null);
+    brokerRpcContract.captureEditorContext.result.parse({
       activeFilePath: '/home/work/happy-vsc/README.md',
       selectedText: 'hello',
       selectionRanges: [
-        { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } },
+        { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 5 },
       ],
       workspaceRoots: ['/home/work/happy-vsc'],
       diagnosticsSummary: { errors: 1, warnings: 2, infos: 3, hints: 4 },
     });
 
-    brokerRpcContract.listAttachments.response.parse({
-      attachments: [{ id: 'att_1', kind: 'file', label: 'foo.ts' }],
+    brokerRpcContract.listAttachments.params.parse({ brokerSessionId: 'sess_123' });
+    brokerRpcContract.listAttachments.result.parse([
+      { id: 'att_1', kind: 'image', label: 'foo.png' },
+    ]);
+
+    brokerRpcContract.subscribeEvents.params.parse({ brokerSessionId: 'sess_123' });
+    brokerRpcContract.subscribeEvents.result.parse(true);
+
+    const discovered = brokerDiscoveredSessionSchema.parse({
+      brokerSessionId: 'sess_123',
+      provider: 'claude',
+      title: 'Attach me',
+      attachability: 'attachable',
+      capabilities: ['sendUserMessage'],
+      degradedFlags: [],
+      desiredMode: 'runtime_preferred',
+      effectiveMode: 'runtime',
+      modeReason: 'mode.selected.by.default',
+      compatibility: 'supported',
+      providerExtension: { id: 'vscode-companion', version: '0.1.0' },
+      probeHealth: { runtime: 'ready', storage: 'ready' },
     });
+    brokerRpcContract.setSessionDesiredMode.result.parse(discovered);
   });
 });

@@ -74,9 +74,18 @@ export const brokerDiscoveredSessionSchema = z
   .merge(brokerRuntimeMetadataSchema);
 export type BrokerDiscoveredSession = z.infer<typeof brokerDiscoveredSessionSchema>;
 
+export const brokerAttachmentKindSchema = z.enum([
+  'image',
+  'file',
+  'patch',
+  'diff',
+  'artifact',
+]);
+export type BrokerAttachmentKind = z.infer<typeof brokerAttachmentKindSchema>;
+
 export const brokerAttachmentRefSchema = z.object({
   id: z.string().min(1),
-  kind: z.string().min(1),
+  kind: brokerAttachmentKindSchema,
   label: z.string().min(1),
   openRef: z.string().min(1).optional(),
 });
@@ -110,15 +119,11 @@ export const brokerSetDesiredModeIntentSchema = z.object({
 });
 export type BrokerSetDesiredModeIntent = z.infer<typeof brokerSetDesiredModeIntentSchema>;
 
-export const brokerPositionSchema = z.object({
-  line: z.number().int().nonnegative(),
-  character: z.number().int().nonnegative(),
-});
-export type BrokerPosition = z.infer<typeof brokerPositionSchema>;
-
 export const brokerSelectionRangeSchema = z.object({
-  start: brokerPositionSchema,
-  end: brokerPositionSchema,
+  startLine: z.number().int().nonnegative(),
+  startCharacter: z.number().int().nonnegative(),
+  endLine: z.number().int().nonnegative(),
+  endCharacter: z.number().int().nonnegative(),
 });
 export type BrokerSelectionRange = z.infer<typeof brokerSelectionRangeSchema>;
 
@@ -131,8 +136,8 @@ export const brokerDiagnosticsSummarySchema = z.object({
 export type BrokerDiagnosticsSummary = z.infer<typeof brokerDiagnosticsSummarySchema>;
 
 export const brokerCaptureEditorContextResultSchema = z.object({
-  activeFilePath: z.string(),
-  selectedText: z.string(),
+  activeFilePath: z.string().nullable(),
+  selectedText: z.string().nullable(),
   selectionRanges: z.array(brokerSelectionRangeSchema),
   workspaceRoots: z.array(z.string()),
   diagnosticsSummary: brokerDiagnosticsSummarySchema,
@@ -157,8 +162,10 @@ export type BrokerEventRole = z.infer<typeof brokerEventRoleSchema>;
 const brokerMessageDeltaEventSchema = z.object({
   type: z.literal('session.message.delta'),
   brokerSessionId: z.string(),
-  role: brokerEventRoleSchema,
-  text: z.string(),
+  payload: z.object({
+    role: brokerEventRoleSchema,
+    text: z.string(),
+  }),
 });
 
 export const brokerRunStatusSchema = z.enum([
@@ -174,29 +181,37 @@ export type BrokerRunStatus = z.infer<typeof brokerRunStatusSchema>;
 const brokerRunStatusEventSchema = z.object({
   type: z.literal('session.run.status'),
   brokerSessionId: z.string(),
-  status: brokerRunStatusSchema,
-  reason: z.string().optional(),
+  payload: z.object({
+    status: brokerRunStatusSchema,
+    reason: z.string().optional(),
+  }),
 });
 
 const brokerApprovalRequestedEventSchema = z.object({
   type: z.literal('session.approval.requested'),
   brokerSessionId: z.string(),
-  approvalId: z.string(),
-  label: z.string(),
-  description: z.string().optional(),
+  payload: z.object({
+    approvalId: z.string(),
+    label: z.string(),
+    description: z.string().optional(),
+  }),
 });
 
 const brokerApprovalResolvedEventSchema = z.object({
   type: z.literal('session.approval.resolved'),
   brokerSessionId: z.string(),
-  approvalId: z.string(),
-  decision: brokerApprovalDecisionSchema,
+  payload: z.object({
+    approvalId: z.string(),
+    decision: brokerApprovalDecisionSchema,
+  }),
 });
 
 const brokerApprovalDismissedEventSchema = z.object({
   type: z.literal('session.approval.dismissed'),
   brokerSessionId: z.string(),
-  approvalId: z.string(),
+  payload: z.object({
+    approvalId: z.string(),
+  }),
 });
 
 export const brokerInterruptOutcomeSchema = z.enum([
@@ -210,14 +225,18 @@ export type BrokerInterruptOutcome = z.infer<typeof brokerInterruptOutcomeSchema
 const brokerInterruptEventSchema = z.object({
   type: z.literal('session.interrupt'),
   brokerSessionId: z.string(),
-  outcome: brokerInterruptOutcomeSchema,
-  reason: z.string().optional(),
+  payload: z.object({
+    outcome: brokerInterruptOutcomeSchema,
+    reason: z.string().optional(),
+  }),
 });
 
 const brokerAttachmentAddedEventSchema = z.object({
   type: z.literal('session.attachment.added'),
   brokerSessionId: z.string(),
-  attachment: brokerAttachmentRefSchema,
+  payload: z.object({
+    attachment: brokerAttachmentRefSchema,
+  }),
 });
 
 export const brokerEventSchema = z.discriminatedUnion('type', [
@@ -234,77 +253,58 @@ export const brokerEventSchema = z.discriminatedUnion('type', [
 export type BrokerEvent = z.infer<typeof brokerEventSchema>;
 
 // Minimal RPC contract surface for the broker. Consumers can use the schemas directly.
-const brokerOkResponseSchema = z.object({ ok: z.literal(true) });
+const brokerOkResultSchema = z.literal(true);
 
-const brokerDiscoverSessionsRequestSchema = z.object({});
-const brokerDiscoverSessionsResponseSchema = z.object({
-  sessions: z.array(brokerDiscoveredSessionSchema),
-});
-
-const brokerAttachSessionRequestSchema = z.object({
+const brokerDiscoverSessionsParamsSchema = z.object({});
+const brokerAttachSessionParamsSchema = z.object({
   brokerSessionId: z.string(),
 });
-const brokerAttachSessionResponseSchema = z.object({
-  snapshot: brokerSnapshotSchema,
-});
-
-const brokerCaptureEditorContextRequestSchema = z.object({
+const brokerCaptureEditorContextParamsSchema = z.object({
   brokerSessionId: z.string(),
 });
-
-const brokerListAttachmentsRequestSchema = z.object({
+const brokerListAttachmentsParamsSchema = z.object({
   brokerSessionId: z.string(),
 });
-const brokerListAttachmentsResponseSchema = z.object({
-  attachments: z.array(brokerAttachmentRefSchema),
-});
-
-const brokerSetSessionDesiredModeResponseSchema = z.object({
-  snapshot: brokerSnapshotSchema,
-});
-
-const brokerSubscribeEventsRequestSchema = z.object({
-  // If omitted, broker decides subscription scope (typically all visible sessions).
-  brokerSessionId: z.string().optional(),
+const brokerSubscribeEventsParamsSchema = z.object({
+  brokerSessionId: z.string(),
 });
 
 export const brokerRpcContract = {
   discoverSessions: {
-    request: brokerDiscoverSessionsRequestSchema,
-    response: brokerDiscoverSessionsResponseSchema,
+    params: brokerDiscoverSessionsParamsSchema,
+    result: z.array(brokerDiscoveredSessionSchema),
   },
   attachSession: {
-    request: brokerAttachSessionRequestSchema,
-    response: brokerAttachSessionResponseSchema,
+    params: brokerAttachSessionParamsSchema,
+    result: brokerSnapshotSchema.nullable(),
   },
   sendMessage: {
-    request: brokerSendMessageIntentSchema,
-    response: brokerOkResponseSchema,
+    params: brokerSendMessageIntentSchema,
+    result: brokerOkResultSchema,
   },
   interruptSession: {
-    request: brokerInterruptIntentSchema,
-    response: brokerOkResponseSchema,
+    params: brokerInterruptIntentSchema,
+    result: brokerOkResultSchema,
   },
   resolveApproval: {
-    request: brokerResolveApprovalIntentSchema,
-    response: brokerOkResponseSchema,
+    params: brokerResolveApprovalIntentSchema,
+    result: brokerOkResultSchema,
   },
   captureEditorContext: {
-    request: brokerCaptureEditorContextRequestSchema,
-    response: brokerCaptureEditorContextResultSchema,
+    params: brokerCaptureEditorContextParamsSchema,
+    result: brokerCaptureEditorContextResultSchema.nullable(),
   },
   listAttachments: {
-    request: brokerListAttachmentsRequestSchema,
-    response: brokerListAttachmentsResponseSchema,
+    params: brokerListAttachmentsParamsSchema,
+    result: z.array(brokerAttachmentRefSchema),
   },
   setSessionDesiredMode: {
-    request: brokerSetDesiredModeIntentSchema,
-    response: brokerSetSessionDesiredModeResponseSchema,
+    params: brokerSetDesiredModeIntentSchema,
+    result: brokerDiscoveredSessionSchema,
   },
   subscribeEvents: {
-    request: brokerSubscribeEventsRequestSchema,
-    // Event stream is out-of-band. This response is just an ack/handshake.
-    response: brokerOkResponseSchema,
+    params: brokerSubscribeEventsParamsSchema,
+    result: brokerOkResultSchema,
   },
 } as const;
 
