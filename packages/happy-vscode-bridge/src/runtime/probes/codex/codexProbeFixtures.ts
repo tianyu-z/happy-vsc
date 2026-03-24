@@ -20,10 +20,12 @@ const fullControlEvidence: FullControlEvidence = {
   },
   commands: {
     smokeCheckCommandIds: [
+      'chatgpt.addToThread',
+      'chatgpt.addFileToThread',
       'chatgpt.openSidebar',
-      'chatgpt.openConversation',
       'chatgpt.newChat',
-      'chatgpt.resetConversation',
+      'chatgpt.implementTodo',
+      'chatgpt.newCodexPanel',
     ],
   },
   contextKeys: ['chatgpt.isActive', 'chatgpt.sessionVisible', 'chatgpt.workspaceSessionId'],
