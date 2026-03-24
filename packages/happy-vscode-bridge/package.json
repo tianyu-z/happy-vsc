@@ -53,6 +53,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
     "build": "node ./esbuild.mjs",
+    "prepackage:vsix": "node ./esbuild.mjs",
     "package:vsix": "vsce package --no-dependencies",
     "test": "vitest run"
   },
@@ -61,7 +62,7 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@types/node": ">=20",
+    "@types/node": "^20.19.30",
     "@types/ws": "^8.18.1",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.27.4",
