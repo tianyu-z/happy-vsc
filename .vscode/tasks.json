@@ -1,0 +1,14 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "happy-vscode-bridge: build",
+      "type": "shell",
+      "command": "corepack",
+      "args": ["yarn", "--cwd", "packages/happy-vscode-bridge", "build"],
+      "problemMatcher": ["$tsc"],
+      "group": "build"
+    }
+  ]
+}
+

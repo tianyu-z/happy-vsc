@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Happy Companion Bridge: Extension Host",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/happy-vscode-bridge",
+        "--disable-extensions"
+      ],
+      "preLaunchTask": "happy-vscode-bridge: build",
+      "outFiles": ["${workspaceFolder}/packages/happy-vscode-bridge/dist/**/*.cjs"]
+    }
+  ]
+}
+

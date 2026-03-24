@@ -1,0 +1,16 @@
+**/*.ts
+**/*.map
+src/**
+tsconfig*.json
+esbuild.mjs
+
+# No dependencies should be needed at runtime because we bundle.
+node_modules/**
+
+# Editor / tooling noise
+.vscode/**
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+

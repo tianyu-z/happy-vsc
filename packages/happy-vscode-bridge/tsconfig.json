@@ -6,8 +6,10 @@
     "strict": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
+    "types": ["node"],
     "baseUrl": ".",
     "rootDir": "src",
     "outDir": "dist"
