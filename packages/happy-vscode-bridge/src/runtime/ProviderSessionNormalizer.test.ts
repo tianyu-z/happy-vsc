@@ -52,7 +52,80 @@ describe('ProviderSessionNormalizer', () => {
     expect(session.conversationIdentity).toBe('record-1');
   });
 
-  it('reuses alias mapping when a storage conversation id later appears without runtime evidence', () => {
+  it('merges runtime and storage workspace evidence before applying workspaceIdentity precedence', () => {
+    const normalizer = new ProviderSessionNormalizer();
+
+    const session = normalizer.normalize({
+      provider: 'claude',
+      providerExtensionId: 'anthropic.claude-code',
+      runtime: {
+        providerSessionRef: 'runtime-ref-1',
+        sessionId: 'session-1',
+        workspace: {
+          folderUris: ['file:///workspace/folder'],
+        },
+      },
+      storage: {
+        providerSessionRef: 'storage-ref-1',
+        conversationId: 'session-1',
+        workspace: {
+          remoteAuthority: 'ssh-remote+devbox',
+          workspaceFileUri: 'file:///workspace/project.code-workspace',
+        },
+      },
+    });
+
+    expect(session.workspaceIdentity).toBe(
+      'remote:ssh-remote+devbox|workspace-file:file:///workspace/project.code-workspace',
+    );
+    expect(session.providerSessionKey).toBe(
+      'v1|anthropic.claude-code|remote:ssh-remote+devbox|workspace-file:file:///workspace/project.code-workspace|session-1',
+    );
+  });
+
+  it('reuses alias mapping after a historical recordId merge established the canonical identity', () => {
+    const normalizer = new ProviderSessionNormalizer();
+
+    normalizer.normalize({
+      provider: 'claude',
+      providerExtensionId: 'anthropic.claude-code',
+      runtime: {
+        providerSessionRef: 'runtime-ref-1',
+        sessionId: 'runtime-1',
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      },
+      storage: {
+        providerSessionRef: 'storage-ref-1',
+        conversationId: 'runtime-1',
+        recordId: 'record-1',
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      },
+    });
+
+    const second = normalizer.normalize({
+      provider: 'claude',
+      providerExtensionId: 'anthropic.claude-code',
+      storage: {
+        providerSessionRef: 'storage-ref-2',
+        conversationId: 'legacy-1',
+        recordId: 'record-1',
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      },
+    });
+
+    expect(second.conversationIdentity).toBe('runtime-1');
+    expect(second.providerSessionKey).toBe(
+      'v1|anthropic.claude-code|folder:file:///workspace|runtime-1',
+    );
+  });
+
+  it('prefers the historical workspace+recordId mapping over a new storage-only conversation id', () => {
     const normalizer = new ProviderSessionNormalizer();
 
     const first = normalizer.normalize({
@@ -67,7 +140,7 @@ describe('ProviderSessionNormalizer', () => {
       },
       storage: {
         providerSessionRef: 'storage-ref-1',
-        conversationId: 'legacy-1',
+        conversationId: 'runtime-1',
         recordId: 'record-1',
         workspace: {
           folderUris: ['file:///workspace'],
@@ -80,7 +153,7 @@ describe('ProviderSessionNormalizer', () => {
       providerExtensionId: 'anthropic.claude-code',
       storage: {
         providerSessionRef: 'storage-ref-2',
-        conversationId: 'legacy-1',
+        conversationId: 'legacy-2',
         recordId: 'record-1',
         workspace: {
           folderUris: ['file:///workspace'],

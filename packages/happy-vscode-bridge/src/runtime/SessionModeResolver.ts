@@ -194,7 +194,7 @@ export class SessionModeResolver {
     const capabilities =
       effectiveMode === 'runtime'
         ? [...(input.runtime.capabilities ?? [])]
-        : [...(input.storage.capabilities ?? [])];
+        : [];
 
     let attachability: BrokerAttachability = baseAttachability;
 

@@ -170,4 +170,24 @@ describe('SessionModeResolver', () => {
     expect(resolved.probeHealth.storage).toBe('stale');
     expect(resolved.degradedFlags).toContain('stale_storage_state');
   });
+
+  it('does not expose full-control capabilities while storage mode is active', () => {
+    const resolver = new SessionModeResolver({ now: () => 0 });
+
+    const resolved = resolver.resolve(
+      makeProbeState({
+        desiredMode: 'storage_preferred',
+        storage: {
+          status: 'ready',
+          lastUpdatedAt: 0,
+          capabilities: ['sendUserMessage', 'interrupt'],
+          degradedFlags: [],
+        },
+      }),
+    );
+
+    expect(resolved.effectiveMode).toBe('storage');
+    expect(resolved.capabilities).toEqual([]);
+    expect(resolved.degradedFlags).toContain('read_only_attach');
+  });
 });

@@ -36,6 +36,26 @@ function normalizeFolderUris(folderUris: string[]): string[] {
   return [...folderUris].map(normalizeUriCase).sort();
 }
 
+function mergeWorkspaceEvidence(
+  runtimeWorkspace: WorkspaceLocator | undefined,
+  storageWorkspace: WorkspaceLocator | undefined,
+): WorkspaceLocator {
+  return {
+    remoteAuthority: firstNonEmpty(
+      runtimeWorkspace?.remoteAuthority,
+      storageWorkspace?.remoteAuthority,
+    ),
+    workspaceFileUri: firstNonEmpty(
+      runtimeWorkspace?.workspaceFileUri,
+      storageWorkspace?.workspaceFileUri,
+    ),
+    folderUris: unique([
+      ...(runtimeWorkspace?.folderUris ?? []),
+      ...(storageWorkspace?.folderUris ?? []),
+    ]),
+  };
+}
+
 function buildWorkspaceIdentity(workspace: WorkspaceLocator): string {
   const prefix = workspace.remoteAuthority
     ? `remote:${workspace.remoteAuthority}|`
@@ -62,7 +82,6 @@ function runtimeIdentity(runtime: RuntimeSessionEvidence | undefined): string | 
     runtime.sessionId,
     runtime.threadId,
     runtime.conversationId,
-    ...(runtime.transcriptObjectIds ?? []),
   );
 }
 
@@ -129,7 +148,10 @@ export class ProviderSessionNormalizer {
   private readonly recordToCanonical = new Map<string, string>();
 
   normalize(input: ProviderSessionNormalizeInput): NormalizedProviderSession {
-    const workspace = input.runtime?.workspace ?? input.storage?.workspace ?? {};
+    const workspace = mergeWorkspaceEvidence(
+      input.runtime?.workspace,
+      input.storage?.workspace,
+    );
     const workspaceIdentity = buildWorkspaceIdentity(workspace);
     const runtimeConversationIdentity = runtimeIdentity(input.runtime);
     const storageConversationIdentity = storageIdentity(input.storage);
@@ -157,19 +179,27 @@ export class ProviderSessionNormalizer {
       : null;
 
     const runtimeCanonical = runtimeAliasKey
-      ? this.aliasToCanonical.get(runtimeAliasKey) ?? runtimeConversationIdentity
+      ? this.aliasToCanonical.get(runtimeAliasKey) ?? null
       : null;
     const storageCanonical = storageAliasKey
-      ? this.aliasToCanonical.get(storageAliasKey) ?? storageConversationIdentity
+      ? this.aliasToCanonical.get(storageAliasKey) ?? null
       : null;
     const recordCanonical = recordKey
       ? this.recordToCanonical.get(recordKey) ?? null
       : null;
 
+    const identitiesMatch =
+      runtimeConversationIdentity !== null &&
+      storageConversationIdentity !== null &&
+      runtimeConversationIdentity === storageConversationIdentity;
+    const hasHistoricalMerge = runtimeCanonical !== null || storageCanonical !== null;
+    const canMergeByRecord = recordCanonical !== null;
+
     const stableConversationIdentity =
       runtimeCanonical ??
       storageCanonical ??
       recordCanonical ??
+      (identitiesMatch ? runtimeConversationIdentity : null) ??
       runtimeConversationIdentity ??
       storageConversationIdentity;
 
@@ -182,11 +212,19 @@ export class ProviderSessionNormalizer {
       this.aliasToCanonical.set(runtimeAliasKey, stableConversationIdentity);
     }
 
-    if (storageAliasKey && stableConversationIdentity) {
+    if (
+      storageAliasKey &&
+      stableConversationIdentity &&
+      (identitiesMatch || hasHistoricalMerge || canMergeByRecord)
+    ) {
       this.aliasToCanonical.set(storageAliasKey, stableConversationIdentity);
     }
 
-    if (recordKey && stableConversationIdentity) {
+    if (
+      recordKey &&
+      stableConversationIdentity &&
+      (identitiesMatch || hasHistoricalMerge || canMergeByRecord)
+    ) {
       this.recordToCanonical.set(recordKey, stableConversationIdentity);
     }
 
