@@ -57,6 +57,41 @@ describe('broker protocol', () => {
     expect(snapshot.probeHealth.storage).toBe('stale');
   });
 
+  it('rejects a snapshot with negative latestSeq and extra fields', () => {
+    expect(() =>
+      brokerSnapshotSchema.parse({
+        brokerSessionId: 'sess_123',
+        provider: 'codex',
+        latestSeq: -1,
+        capabilities: ['sendUserMessage'],
+        degradedFlags: [],
+        desiredMode: 'runtime_preferred',
+        effectiveMode: 'runtime',
+        modeReason: 'mode.selected.by.default',
+        compatibility: 'supported',
+        providerExtension: { id: 'vscode-companion', version: '0.1.0' },
+        probeHealth: { runtime: 'ready', storage: 'ready' },
+        extra: 'nope',
+      }),
+    ).toThrow();
+
+    expect(() =>
+      brokerSnapshotSchema.parse({
+        brokerSessionId: 'sess_123',
+        provider: 'codex',
+        latestSeq: 1.1,
+        capabilities: ['sendUserMessage'],
+        degradedFlags: [],
+        desiredMode: 'runtime_preferred',
+        effectiveMode: 'runtime',
+        modeReason: 'mode.selected.by.default',
+        compatibility: 'supported',
+        providerExtension: { id: 'vscode-companion', version: '0.1.0' },
+        probeHealth: { runtime: 'ready', storage: 'ready' },
+      }),
+    ).toThrow();
+  });
+
   it('parses an attachment ref (kind enum)', () => {
     expect(
       brokerAttachmentRefSchema.parse({
@@ -68,6 +103,15 @@ describe('broker protocol', () => {
     ).toBe('image');
   });
 
+  it('rejects an empty brokerSessionId in intents', () => {
+    expect(() =>
+      brokerSendMessageIntentSchema.parse({
+        brokerSessionId: '',
+        text: '',
+      }),
+    ).toThrow();
+  });
+
   it('parses event: session.message.delta', () => {
     const evt = brokerEventSchema.parse({
       type: 'session.message.delta',
@@ -77,6 +121,16 @@ describe('broker protocol', () => {
     if (evt.type !== 'session.message.delta') throw new Error('unexpected event type');
     expect(evt.payload.role).toBe('assistant');
     expect(evt.payload.text).toBe('Hello');
+  });
+
+  it('rejects extra fields in a live event payload', () => {
+    expect(() =>
+      brokerEventSchema.parse({
+        type: 'session.message.delta',
+        brokerSessionId: 'sess_123',
+        payload: { role: 'assistant', text: 'Hello', extra: 123 },
+      }),
+    ).toThrow();
   });
 
   it('parses event: session.run.status', () => {
@@ -291,6 +345,13 @@ describe('broker protocol', () => {
 
     brokerRpcContract.subscribeEvents.params.parse({ brokerSessionId: 'sess_123' });
     brokerRpcContract.subscribeEvents.result.parse(true);
+
+    expect(() =>
+      brokerRpcContract.subscribeEvents.params.parse({
+        brokerSessionId: 'sess_123',
+        extra: true,
+      }),
+    ).toThrow();
 
     const discovered = brokerDiscoveredSessionSchema.parse({
       brokerSessionId: 'sess_123',
