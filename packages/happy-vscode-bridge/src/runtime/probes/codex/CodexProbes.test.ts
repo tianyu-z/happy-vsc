@@ -207,6 +207,30 @@ describe('Codex probes', () => {
     );
   });
 
+  it('does not blame the attachment bridge when the session is not attachable', async () => {
+    const probe = new CodexRuntimeProbe(makeHostResolution(), {
+      listSessions: async () => [
+        {
+          providerSessionRef: 'runtime-ref-4',
+          conversationId: 'codex-4',
+          canAttach: false,
+          eventStreamAvailable: true,
+          workspace: {
+            folderUris: ['file:///workspace'],
+          },
+        },
+      ],
+      sendMessage: async () => {},
+      watchSession: async () => () => {},
+      attachmentBridgeAvailable: false,
+    });
+
+    const [session] = await probe.discoverSessions();
+
+    expect(session.attachability).toBe('not_attachable');
+    expect(session.degradedFlags).not.toContain('attachment_bridge_unavailable');
+  });
+
   it('forwards runtime actions through injected bridges', async () => {
     const sendMessage = vi.fn(async () => {});
     const interrupt = vi.fn(async () => {});

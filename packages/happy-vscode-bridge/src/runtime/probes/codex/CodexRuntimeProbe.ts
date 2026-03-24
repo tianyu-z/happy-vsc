@@ -97,7 +97,10 @@ export class CodexRuntimeProbe implements RuntimeProbe {
         degradedFlags.push('approval_bridge_unavailable');
       }
 
-      if (this.options.attachmentBridgeAvailable === false) {
+      if (
+        session.canAttach !== false &&
+        this.options.attachmentBridgeAvailable === false
+      ) {
         degradedFlags.push('attachment_bridge_unavailable');
       }
 
