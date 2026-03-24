@@ -8,6 +8,7 @@ import {
   brokerInterruptIntentSchema,
   brokerResolveApprovalIntentSchema,
   brokerSetDesiredModeIntentSchema,
+  brokerAttachmentRefSchema,
 } from './brokerProtocol';
 
 describe('broker protocol', () => {
@@ -56,6 +57,17 @@ describe('broker protocol', () => {
     expect(snapshot.probeHealth.storage).toBe('stale');
   });
 
+  it('parses an attachment ref (kind enum)', () => {
+    expect(
+      brokerAttachmentRefSchema.parse({
+        id: 'att_1',
+        kind: 'image',
+        label: 'foo.png',
+        openRef: 'vscode://file/foo.png',
+      }).kind,
+    ).toBe('image');
+  });
+
   it('parses event: session.message.delta', () => {
     const evt = brokerEventSchema.parse({
       type: 'session.message.delta',
@@ -93,6 +105,16 @@ describe('broker protocol', () => {
     });
     if (evt.type !== 'session.approval.requested') throw new Error('unexpected event type');
     expect(evt.payload.approvalId).toBe('appr_1');
+  });
+
+  it('parses event: session.approval.resolved', () => {
+    const evt = brokerEventSchema.parse({
+      type: 'session.approval.resolved',
+      brokerSessionId: 'sess_123',
+      payload: { approvalId: 'appr_1', decision: 'approve' },
+    });
+    if (evt.type !== 'session.approval.resolved') throw new Error('unexpected event type');
+    expect(evt.payload.decision).toBe('approve');
   });
 
   it('parses event: session.approval.dismissed', () => {
@@ -150,22 +172,43 @@ describe('broker protocol', () => {
     expect(evt.snapshot.probeHealth.runtime).toBe('ready');
   });
 
+  it('parses a broker event envelope: session.discovered', () => {
+    const evt = brokerEventSchema.parse({
+      type: 'session.discovered',
+      session: {
+        brokerSessionId: 'sess_123',
+        provider: 'claude',
+        title: 'Attach me',
+        attachability: 'attachable',
+        capabilities: ['sendUserMessage'],
+        degradedFlags: [],
+        desiredMode: 'runtime_preferred',
+        effectiveMode: 'runtime',
+        modeReason: 'mode.selected.by.default',
+        compatibility: 'supported',
+        providerExtension: { id: 'vscode-companion', version: '0.1.0' },
+        probeHealth: { runtime: 'ready', storage: 'ready' },
+      },
+    });
+    if (evt.type !== 'session.discovered') throw new Error('unexpected event type');
+    expect(evt.session.provider).toBe('claude');
+    expect(evt.session.modeReason).toBe('mode.selected.by.default');
+  });
+
   it('exposes an RPC contract with parseable intent schemas', () => {
-    const methods = [
-      'discoverSessions',
-      'attachSession',
-      'sendMessage',
-      'interruptSession',
-      'resolveApproval',
-      'captureEditorContext',
-      'listAttachments',
-      'setSessionDesiredMode',
-      'subscribeEvents',
-    ] as const;
-    for (const m of methods) {
-      expect(brokerRpcContract[m].params).toBeDefined();
-      expect(brokerRpcContract[m].result).toBeDefined();
-    }
+    expect(Object.keys(brokerRpcContract).sort()).toEqual(
+      [
+        'discoverSessions',
+        'attachSession',
+        'sendMessage',
+        'interruptSession',
+        'resolveApproval',
+        'captureEditorContext',
+        'listAttachments',
+        'setSessionDesiredMode',
+        'subscribeEvents',
+      ].sort(),
+    );
 
     const send = brokerSendMessageIntentSchema.parse({
       brokerSessionId: 'sess_123',
