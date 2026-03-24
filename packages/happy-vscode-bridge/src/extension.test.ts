@@ -16,6 +16,7 @@ describe('bridge extension entrypoint', () => {
       engines?: { vscode?: unknown };
     };
     expect(pkg.engines?.vscode).toBeTruthy();
+    expect(typeof pkg.main).toBe('string');
     expect(pkg.main).toContain('dist/');
   });
 
