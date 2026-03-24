@@ -10,9 +10,8 @@
         "--extensionDevelopmentPath=${workspaceFolder}/packages/happy-vscode-bridge",
         "--disable-extensions"
       ],
-      "preLaunchTask": "happy-vscode-bridge: build",
+      "preLaunchTask": "happy-vscode-bridge: prelaunch",
       "outFiles": ["${workspaceFolder}/packages/happy-vscode-bridge/dist/**/*.cjs"]
     }
   ]
 }
-

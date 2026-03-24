@@ -2,13 +2,30 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "happy-vscode-bridge: typecheck",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "COREPACK_HOME=/tmp/corepack corepack yarn --cwd packages/happy-vscode-bridge typecheck"
+      ],
+      "problemMatcher": ["$tsc"]
+    },
+    {
       "label": "happy-vscode-bridge: build",
       "type": "shell",
-      "command": "corepack",
-      "args": ["yarn", "--cwd", "packages/happy-vscode-bridge", "build"],
-      "problemMatcher": ["$tsc"],
+      "command": "bash",
+      "args": [
+        "-lc",
+        "COREPACK_HOME=/tmp/corepack corepack yarn --cwd packages/happy-vscode-bridge build"
+      ]
+    },
+    {
+      "label": "happy-vscode-bridge: prelaunch",
+      "type": "shell",
+      "dependsOn": ["happy-vscode-bridge: typecheck", "happy-vscode-bridge: build"],
+      "dependsOrder": "sequence",
       "group": "build"
     }
   ]
 }
-
