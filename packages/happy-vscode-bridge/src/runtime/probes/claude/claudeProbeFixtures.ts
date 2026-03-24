@@ -5,6 +5,13 @@ export type StorageEvidence = {
   notes?: string;
 };
 
+export type ReconEvidenceSource = {
+  // e.g. "provider_docs", "plan", "operator_recon_required"
+  kind: string;
+  ref: string;
+  notes?: string;
+};
+
 export type ProviderFailurePolicy = {
   compatibility: 'unknown';
   degradedFlags: readonly ['runtime_probe_unverified'];
@@ -13,7 +20,7 @@ export type ProviderFailurePolicy = {
 
 export type ProviderKey = 'claude' | 'codex';
 
-export type FullControlEvidenceKey =
+export type ReconBaselineKey =
   | 'extensionId'
   | 'extensionVersion'
   | 'exportsShape'
@@ -22,7 +29,9 @@ export type FullControlEvidenceKey =
   | 'storagePath'
   | 'workspaceBinding';
 
-export type FullControlEvidence = {
+export type ReconEvidenceBaseline = {
+  verificationState: 'unverified';
+  sources: ReconEvidenceSource[];
   extensionId: string;
   extensionVersion: string;
   exportsShape: {
@@ -40,7 +49,7 @@ export type FullControlEvidence = {
 
 export type ProviderProbeFixture = {
   providerName: string;
-  fullControlEvidence: FullControlEvidence;
+  reconBaseline: ReconEvidenceBaseline;
   failurePolicy: ProviderFailurePolicy;
 };
 
@@ -50,7 +59,7 @@ export const unverifiedRuntimeProbeFailurePolicy: ProviderFailurePolicy = {
   attachability: 'attachable_with_degraded_capabilities',
 };
 
-export const fullControlEvidenceChecklist: readonly FullControlEvidenceKey[] = [
+export const reconBaselineChecklist: readonly ReconBaselineKey[] = [
   'extensionId',
   'extensionVersion',
   'exportsShape',
@@ -61,43 +70,42 @@ export const fullControlEvidenceChecklist: readonly FullControlEvidenceKey[] = [
 ] as const;
 
 // Fixture-only helper: keeps probes evidence-driven, rather than guessing private provider entrypoints.
-export function readFixtureChecklist(_provider: ProviderKey): readonly FullControlEvidenceKey[] {
-  return fullControlEvidenceChecklist;
+export function readFixtureChecklist(_provider: ProviderKey): readonly ReconBaselineKey[] {
+  return reconBaselineChecklist;
 }
 
 export const claudeProbeFixtures: ProviderProbeFixture = {
   providerName: 'Claude',
-  fullControlEvidence: {
+  reconBaseline: {
+    verificationState: 'unverified',
+    sources: [
+      {
+        kind: 'plan',
+        ref: 'docs/superpowers/plans/2026-03-24-vscode-companion-extension-runtime-implementation.md#task-0-provider-recon-and-stable-fixtures',
+        notes: 'Unverified baseline fixture. Replace placeholders with live recon artifacts from the locally installed VS Code extension.',
+      },
+    ],
     extensionId: 'anthropic.claude-code',
-    extensionVersion: '2.0.0',
+    extensionVersion: 'PENDING_RECON',
     exportsShape: {
-      module: 'dist/extension.js (the live session webview registrar)',
-      exportedHooks: [
-        'registerLiveSessionPanel',
-        'collectWorkspaceContext',
-        'reportSessionState',
-      ],
-      remark: 'Extension exports an activate() handler that wires commands, context keys, and storage access for the webview panel.',
+      module: 'PENDING_RECON: extension entrypoint/module path (unverified baseline)',
+      exportedHooks: ['PENDING_RECON: exported hook names (unverified baseline)'],
+      remark: 'Unverified baseline. Do not assume these hook names exist until recon validates the installed extension exports.',
     },
     commands: {
       smokeCheckCommandIds: ['claude-code.open', 'claude-code.acceptDiff', 'claude-code.rejectDiff'],
     },
-    contextKeys: ['claude-code.diffVisible', 'claude-code.sessionActive'],
+    contextKeys: ['PENDING_RECON: context keys used for live-session detection (unverified baseline)'],
     storagePath: [
       {
-        path: '~/.claude/ide',
-        format: 'directory of JSON metadata per live session',
-        workspaceLinked: 'each JSON entry embeds the workspace URI and sessionId, anchoring the runtime to a workspace',
-        notes: 'Referenced in user-reported errors when the IDE probe scans for live sessions.',
-      },
-      {
-        path: '<vscode globalStorage>/anthropic.claude-code/live-session.json',
-        format: 'JSON object',
-        workspaceLinked: 'records the active workspaceFolderUri and last sessionId for the workspace before connecting',
+        path: 'PENDING_RECON: storage location(s) used by Claude Code (unverified baseline)',
+        format: 'PENDING_RECON: file/directory format',
+        workspaceLinked: 'PENDING_RECON: how storage entries link to workspace/session identity',
+        notes: 'Replace with observed storage paths and file formats captured during recon.',
       },
     ],
     workspaceBinding:
-      'Workspaces get bound through the .claude directory (workspace-session JSON) alongside the globalStorage entry storing the workspace URI, so we only declare full control when both records agree.',
+      'PENDING_RECON: how the Claude Code extension binds runtime sessions to the current VS Code workspace (unverified baseline).',
   },
   failurePolicy: unverifiedRuntimeProbeFailurePolicy,
 };

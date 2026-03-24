@@ -14,7 +14,7 @@ function expectNonEmptyStringArray(value: unknown) {
   (value as unknown[]).forEach((entry) => expectNonEmptyString(entry));
 }
 
-const requiredFullControlEvidenceKeys = [
+const requiredReconBaselineKeys = [
   'extensionId',
   'extensionVersion',
   'exportsShape',
@@ -25,7 +25,7 @@ const requiredFullControlEvidenceKeys = [
 ] as const;
 
 describe('Provider Probe Fixtures', () => {
-  test('document the provider evidence required for full-control', () => {
+  test('document the provider evidence required for full-control (as an unverified recon baseline)', () => {
     const providers = [
       { providerKey: 'claude', name: 'Claude', fixture: claudeProbeFixtures },
       { providerKey: 'codex', name: 'Codex', fixture: codexProbeFixtures },
@@ -35,32 +35,43 @@ describe('Provider Probe Fixtures', () => {
       expect(fixture.providerName).toBe(name);
 
       // This is intentionally a helper to prevent probe authors from "guessing" evidence keys.
-      expect(readFixtureChecklist(providerKey)).toEqual(
-        expect.arrayContaining([...requiredFullControlEvidenceKeys]),
-      );
+      expect(readFixtureChecklist(providerKey)).toEqual([...requiredReconBaselineKeys]);
 
-      requiredFullControlEvidenceKeys.forEach((field) => {
-        expect(fixture.fullControlEvidence).toHaveProperty(field);
+      requiredReconBaselineKeys.forEach((field) => {
+        expect(fixture.reconBaseline).toHaveProperty(field);
       });
 
       // Prevent fixtures from degrading into empty placeholders while still satisfying shape checks.
-      expectNonEmptyString(fixture.fullControlEvidence.extensionId);
-      expectNonEmptyString(fixture.fullControlEvidence.extensionVersion);
+      expect(fixture.reconBaseline.verificationState).toBe('unverified');
+      expect(Array.isArray(fixture.reconBaseline.sources)).toBe(true);
+      expect(fixture.reconBaseline.sources.length).toBeGreaterThan(0);
+      fixture.reconBaseline.sources.forEach((source) => {
+        expectNonEmptyString(source.kind);
+        expectNonEmptyString(source.ref);
+      });
 
-      expect(fixture.fullControlEvidence.commands).toBeDefined();
-      expectNonEmptyStringArray(fixture.fullControlEvidence.commands.smokeCheckCommandIds);
+      expectNonEmptyString(fixture.reconBaseline.extensionId);
+      expectNonEmptyString(fixture.reconBaseline.extensionVersion);
+      expect(fixture.reconBaseline.extensionVersion).toBe('PENDING_RECON');
 
-      expectNonEmptyStringArray(fixture.fullControlEvidence.contextKeys);
+      expect(fixture.reconBaseline.exportsShape).toBeDefined();
+      expectNonEmptyString(fixture.reconBaseline.exportsShape.module);
+      expectNonEmptyStringArray(fixture.reconBaseline.exportsShape.exportedHooks);
 
-      expect(Array.isArray(fixture.fullControlEvidence.storagePath)).toBe(true);
-      expect(fixture.fullControlEvidence.storagePath.length).toBeGreaterThan(0);
-      fixture.fullControlEvidence.storagePath.forEach((entry) => {
+      expect(fixture.reconBaseline.commands).toBeDefined();
+      expectNonEmptyStringArray(fixture.reconBaseline.commands.smokeCheckCommandIds);
+
+      expectNonEmptyStringArray(fixture.reconBaseline.contextKeys);
+
+      expect(Array.isArray(fixture.reconBaseline.storagePath)).toBe(true);
+      expect(fixture.reconBaseline.storagePath.length).toBeGreaterThan(0);
+      fixture.reconBaseline.storagePath.forEach((entry) => {
         expectNonEmptyString(entry.path);
         expectNonEmptyString(entry.format);
         expectNonEmptyString(entry.workspaceLinked);
       });
 
-      expectNonEmptyString(fixture.fullControlEvidence.workspaceBinding);
+      expectNonEmptyString(fixture.reconBaseline.workspaceBinding);
     });
   });
 
@@ -74,7 +85,7 @@ describe('Provider Probe Fixtures', () => {
       'chatgpt.openSidebar',
     ] as const;
 
-    const actual = [...codexProbeFixtures.fullControlEvidence.commands.smokeCheckCommandIds].sort();
+    const actual = [...codexProbeFixtures.reconBaseline.commands.smokeCheckCommandIds].sort();
     const expectedSorted = [...expected].sort();
 
     expect(actual).toEqual(expectedSorted);

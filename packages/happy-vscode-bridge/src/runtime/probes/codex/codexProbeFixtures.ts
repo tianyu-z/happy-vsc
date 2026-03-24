@@ -1,4 +1,4 @@
-import type { ProviderProbeFixture, ProviderFailurePolicy, FullControlEvidence } from '../claude/claudeProbeFixtures';
+import type { ProviderProbeFixture, ProviderFailurePolicy, ReconEvidenceBaseline } from '../claude/claudeProbeFixtures';
 
 const failurePolicy: ProviderFailurePolicy = {
   compatibility: 'unknown',
@@ -6,17 +6,26 @@ const failurePolicy: ProviderFailurePolicy = {
   attachability: 'attachable_with_degraded_capabilities',
 };
 
-const fullControlEvidence: FullControlEvidence = {
+const reconBaseline: ReconEvidenceBaseline = {
+  verificationState: 'unverified',
+  sources: [
+    {
+      kind: 'provider_docs',
+      ref: 'https://developers.openai.com/codex/ide/commands',
+      notes: 'Command ids are taken from the official IDE commands page; other fields remain pending recon.',
+    },
+    {
+      kind: 'plan',
+      ref: 'docs/superpowers/plans/2026-03-24-vscode-companion-extension-runtime-implementation.md#task-0-provider-recon-and-stable-fixtures',
+      notes: 'Unverified baseline fixture. Replace placeholders with live recon artifacts from the locally installed VS Code extension.',
+    },
+  ],
   extensionId: 'openai.chatgpt',
-  extensionVersion: '1.0.0',
+  extensionVersion: 'PENDING_RECON',
   exportsShape: {
-    module: 'dist/extension.js (activation manager)',
-    exportedHooks: [
-      'createLiveChatPanel',
-      'resolveWorkspaceSession',
-      'reportSessionStatus',
-    ],
-    remark: 'Exports a live session registrar that wires the loopback broker receiver, storage helpers, and context-key setters.',
+    module: 'PENDING_RECON: extension entrypoint/module path (unverified baseline)',
+    exportedHooks: ['PENDING_RECON: exported hook names (unverified baseline)'],
+    remark: 'Unverified baseline. Do not assume these hook names exist until recon validates the installed extension exports.',
   },
   commands: {
     smokeCheckCommandIds: [
@@ -28,26 +37,21 @@ const fullControlEvidence: FullControlEvidence = {
       'chatgpt.newCodexPanel',
     ],
   },
-  contextKeys: ['chatgpt.isActive', 'chatgpt.sessionVisible', 'chatgpt.workspaceSessionId'],
+  contextKeys: ['PENDING_RECON: context keys used for live-session detection (unverified baseline)'],
   storagePath: [
     {
-      path: '<vscode globalStorage>/openai.chatgpt/session-state.json',
-      format: 'JSON object keyed by workspaceURI with sessionId/lastActive metadata',
-      workspaceLinked: 'the workspace URI key ties each session-state entry to the running workspace that owns that session ID',
-    },
-    {
-      path: '~/.chatgpt/vsc-session',
-      format: 'per-workspace directory holding JSON session logs',
-      workspaceLinked: 'each log file is named after the workspace identifier and includes workspace URI reference fields',
-      notes: 'Referenced by extension telemetry as the workspace session cache when workspaces reopen.',
+      path: 'PENDING_RECON: storage location(s) used by the OpenAI Codex/ChatGPT VS Code extension (unverified baseline)',
+      format: 'PENDING_RECON: file/directory format',
+      workspaceLinked: 'PENDING_RECON: how storage entries link to workspace/session identity',
+      notes: 'Replace with observed storage paths and file formats captured during recon.',
     },
   ],
   workspaceBinding:
-    'Workspace linkage is confirmed when the globalStorage session-state entry matches the workspace URI of the live workspace and the external cache folder entry shares the same sessionId.',
+    'PENDING_RECON: how the Codex extension binds runtime sessions to the current VS Code workspace (unverified baseline).',
 };
 
 export const codexProbeFixtures: ProviderProbeFixture = {
   providerName: 'Codex',
-  fullControlEvidence,
+  reconBaseline,
   failurePolicy,
 };

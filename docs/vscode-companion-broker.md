@@ -23,6 +23,8 @@ Out of scope for this phase:
 
 The companion extension intentionally avoids guessing private provider internals (entrypoints, hidden commands, storage layouts). Before implementing or upgrading any provider RuntimeProbe/StorageProbe, capture recon evidence in stable fixtures and keep it versioned in-repo.
 
+Important: the Task 0 fixtures are **unverified baselines** in this repo environment. They are not proof of what is installed locally. They exist to define the evidence requirements and failure policy. Baselines must be upgraded to verified recon artifacts only after live inspection of the locally installed VS Code extension.
+
 Full-control evidence baseline keys (per provider):
 
 - `extensionId`
@@ -32,6 +34,12 @@ Full-control evidence baseline keys (per provider):
 - `contextKeys`
 - `storagePath`
 - `workspaceBinding`
+
+Fixture metadata expectations:
+
+- `verificationState=unverified` until recon captures observed facts
+- `extensionVersion=PENDING_RECON` as an explicit sentinel so it cannot be mistaken for an observed installed version
+- non-empty `sources[]` references documenting where each baseline claim came from (docs link, plan reference, operator recon notes)
 
 Failure policy if the evidence is missing or unverified:
 
