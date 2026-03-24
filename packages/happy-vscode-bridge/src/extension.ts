@@ -200,6 +200,7 @@ export async function activate(
   return {
     started: true,
     port: activeServer ? activeServer.port : 0,
+    manifestPath: manifestStore.getPath(),
     commands: [...bridgeCommandIds],
   };
 }

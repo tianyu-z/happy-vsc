@@ -73,6 +73,37 @@ Use this startup order. The broker only discovers sessions that were started in 
 
 The companion extension is the only local broker. Happy should connect to the broker manifest instead of trying to talk to the official plugin directly.
 
+## F5 Development Host
+
+Use the repo root workspace, not the package folder by itself.
+
+1. Open `/home/work/happy-vsc` (or the active worktree root) in VS Code.
+2. Select the launch config `Happy Companion Bridge: Extension Host`.
+3. Press `F5`.
+4. Wait for the prelaunch tasks to finish:
+   - `happy-vscode-bridge: typecheck`
+   - `happy-vscode-bridge: build`
+5. In the Extension Development Host window, confirm the `Happy Companion` activity bar view appears and the broker status bar item is visible.
+6. Start an official Claude Code or Codex session in that same Extension Development Host window.
+7. Use `Happy Companion: Refresh Sessions` if discovery does not appear immediately.
+
+This is the recommended local workflow because it exercises the same runtime path that production `.vsix` installs use.
+
+## Packaging A `.vsix`
+
+Build and package from the repo root:
+
+```bash
+COREPACK_HOME=/tmp/corepack corepack yarn --cwd packages/happy-vscode-bridge build
+COREPACK_HOME=/tmp/corepack corepack yarn --cwd packages/happy-vscode-bridge package:vsix
+```
+
+Expected artifact:
+
+- `packages/happy-vscode-bridge/*.vsix`
+
+Install that `.vsix` into the VS Code window where you want Happy Companion to run, then restart or reload the window before verifying discovery.
+
 ## Attach Flow
 
 At a high level:
@@ -89,6 +120,22 @@ Attachability states:
 - `attachable_with_degraded_capabilities`: attach still works, but some shared controls remain limited.
 - `not_attachable`: discovery succeeded, but the live session should not be attached.
 
+## Mode Resolution
+
+Each discovered/attached broker session carries two mode fields:
+
+- `desiredMode`: what the operator or UI asked for.
+- `effectiveMode`: what the bridge can safely provide right now.
+
+Current modes:
+
+- `runtime_preferred`: recommended default. Use RuntimeProbe first and automatically fall back to storage if runtime evidence becomes unavailable or degraded.
+- `storage_preferred`: explicit operator override. Stay on storage-backed discovery/attach unless runtime is re-selected.
+- `runtime`: full-control live bridge is active.
+- `storage`: degraded fallback. Treat as read-only unless provider-specific recon proves a safe write bridge.
+
+When `desiredMode=runtime_preferred` but `effectiveMode=storage`, the broker should also report a machine-readable `modeReason` such as `runtime_unavailable_fallback_to_storage`. Happy surfaces that directly in the machine attach UI and in broker-attached session metadata.
+
 ## Degraded Mode
 
 If attach succeeds with degraded capabilities, Happy should still show the session, but the metadata/status row will explain which controls are limited.
@@ -104,6 +151,13 @@ Current degraded flags:
 
 Treat degraded mode as productized behavior, not a hidden partial success.
 
+Runtime/storage fallback expectations:
+
+- `runtime_probe_unverified`: runtime evidence is incomplete, so the session should be treated as degraded until recon is refreshed.
+- `read_only_attach`: attach still works, but write/control actions should stay in VS Code.
+- `interrupt_bridge_unavailable`, `approval_bridge_unavailable`, `attachment_bridge_unavailable`: these controls remain local to VS Code while attach stays available.
+- `selection_context_stale`: editor-derived context may lag behind the active selection.
+
 ## Troubleshooting
 
 If no broker sessions appear:
@@ -118,6 +172,8 @@ If attach works but capabilities are limited:
 - Read the degraded flags shown in the attached Happy session.
 - Use VS Code for any capability that the degraded flags say is still local to VS Code.
 - Recheck provider / plugin versions if degraded flags appear unexpectedly.
+
+If the smoke test or Extension Development Host exits with a non-zero code but still emits a valid smoke JSON payload, treat the payload as the real pass/fail source. In this WSL + Windows VS Code environment, the desktop host can report a noisy non-zero exit on window close even when the extension activated successfully.
 
 If discovery fails after a code update:
 
@@ -136,9 +192,27 @@ COREPACK_HOME=/tmp/corepack corepack yarn --cwd packages/happy-cli typecheck
 COREPACK_HOME=/tmp/corepack corepack yarn --cwd packages/happy-app typecheck
 
 npx vitest run packages/happy-wire/src/brokerProtocol.test.ts
-npx vitest run packages/happy-vscode-bridge/src/extension.test.ts packages/happy-vscode-bridge/src/broker/BrokerServer.test.ts
-npx vitest run packages/happy-cli/src/broker/BrokerClient.test.ts packages/happy-cli/src/api/apiMachine.test.ts
-npx vitest run packages/happy-app/sources/sync/ops.broker.test.ts packages/happy-app/sources/utils/brokerSessionUtils.test.ts
+npx vitest run packages/happy-vscode-bridge/src/extension.test.ts \
+  packages/happy-vscode-bridge/src/broker/BrokerServer.test.ts \
+  packages/happy-vscode-bridge/src/runtime/ProviderSessionNormalizer.test.ts \
+  packages/happy-vscode-bridge/src/runtime/SessionModeResolver.test.ts \
+  packages/happy-vscode-bridge/src/runtime/UnifiedSessionRuntimeStore.test.ts \
+  packages/happy-vscode-bridge/src/runtime/ProviderHostRegistry.test.ts \
+  packages/happy-vscode-bridge/src/runtime/CompanionRuntime.test.ts \
+  packages/happy-vscode-bridge/src/runtime/AdapterFacade.test.ts \
+  packages/happy-vscode-bridge/src/runtime/probes/claude/ClaudeProbes.test.ts \
+  packages/happy-vscode-bridge/src/runtime/probes/codex/CodexProbes.test.ts \
+  packages/happy-vscode-bridge/src/ui/ui.test.ts
+npx vitest run packages/happy-cli/src/broker/BrokerClient.test.ts \
+  packages/happy-cli/src/broker/runBrokerAttachedSession.test.ts \
+  packages/happy-cli/src/api/apiMachine.test.ts
+npx vitest run packages/happy-app/sources/sync/ops.broker.test.ts \
+  packages/happy-app/sources/utils/brokerSessionUtils.test.ts
+
+COREPACK_HOME=/tmp/corepack corepack yarn --cwd packages/happy-vscode-bridge build
+COREPACK_HOME=/tmp/corepack corepack yarn --cwd packages/happy-vscode-bridge package:vsix
+
+node packages/happy-vscode-bridge/scripts/runExtensionHostTests.mjs
 ```
 
 Expected result: every command exits successfully.

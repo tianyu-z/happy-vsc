@@ -15,6 +15,10 @@ export class BrokerManifestStore {
     this.file = join(rootDir, 'broker', 'instance.json');
   }
 
+  getPath() {
+    return this.file;
+  }
+
   async write(manifest: BrokerInstanceManifest) {
     await mkdir(dirname(this.file), { recursive: true });
     await writeFile(this.file, JSON.stringify(manifest, null, 2));
