@@ -165,6 +165,59 @@ describe('ProviderSessionNormalizer', () => {
     expect(second.providerSessionKey).toBe(first.providerSessionKey);
   });
 
+  it('marks a first cross-source identity mismatch as unstable instead of merging', () => {
+    const normalizer = new ProviderSessionNormalizer();
+
+    const session = normalizer.normalize({
+      provider: 'claude',
+      providerExtensionId: 'anthropic.claude-code',
+      runtime: {
+        providerSessionRef: 'runtime-ref-1',
+        sessionId: 'runtime-1',
+        latestSeq: 3,
+        capabilities: ['sendUserMessage'],
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      },
+      storage: {
+        providerSessionRef: 'storage-ref-1',
+        conversationId: 'legacy-1',
+        latestSeq: 99,
+        capabilities: ['interrupt'],
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      },
+    });
+
+    expect(session.conversationIdentity).toBeNull();
+    expect(session.storageProviderSessionRef).toBeNull();
+    expect(session.latestSeq).toBe(3);
+    expect(session.capabilities).toEqual(['sendUserMessage']);
+    expect(session.attachability).toBe('not_attachable');
+    expect(session.degradedFlags).toContain('unstable_session_identity');
+  });
+
+  it('uses transcript/state object ids as the final stable identity fallback', () => {
+    const normalizer = new ProviderSessionNormalizer();
+
+    const session = normalizer.normalize({
+      provider: 'codex',
+      providerExtensionId: 'openai.chatgpt',
+      runtime: {
+        providerSessionRef: 'runtime-ref-transcript',
+        transcriptObjectIds: ['transcript-object-1'],
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      },
+    });
+
+    expect(session.conversationIdentity).toBe('transcript-object-1');
+    expect(session.attachability).toBe('attachable');
+  });
+
   it('marks sessions without a stable identity as not attachable', () => {
     const normalizer = new ProviderSessionNormalizer();
 

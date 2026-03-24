@@ -5,6 +5,7 @@ export const modeReasons = {
   runtimeDegraded: 'runtime_degraded',
   runtimeUnavailableFallbackToStorage: 'runtime_unavailable_fallback_to_storage',
   runtimeRecoveryReboundThrottled: 'runtime_recovery_rebound_throttled',
+  noProbeAvailable: 'no_probe_available',
   storagePreferredSelected: 'storage_preferred_selected',
   storageStaleSelected: 'storage_stale_selected',
   storageUnavailableFallbackToRuntime: 'storage_unavailable_fallback_to_runtime',

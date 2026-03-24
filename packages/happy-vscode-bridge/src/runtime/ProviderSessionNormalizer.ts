@@ -90,10 +90,24 @@ function storageIdentity(storage: StorageSessionEvidence | undefined): string | 
     return null;
   }
 
+  return firstNonEmpty(storage.conversationId);
+}
+
+function storageRecordIdentity(storage: StorageSessionEvidence | undefined): string | null {
+  if (!storage) {
+    return null;
+  }
+
+  return firstNonEmpty(storage.recordId);
+}
+
+function transcriptStateIdentity(
+  runtime: RuntimeSessionEvidence | undefined,
+  storage: StorageSessionEvidence | undefined,
+): string | null {
   return firstNonEmpty(
-    storage.conversationId,
-    storage.recordId,
-    ...(storage.transcriptObjectIds ?? []),
+    ...(runtime?.transcriptObjectIds ?? []),
+    ...(storage?.transcriptObjectIds ?? []),
   );
 }
 
@@ -155,6 +169,11 @@ export class ProviderSessionNormalizer {
     const workspaceIdentity = buildWorkspaceIdentity(workspace);
     const runtimeConversationIdentity = runtimeIdentity(input.runtime);
     const storageConversationIdentity = storageIdentity(input.storage);
+    const storageRecordConversationIdentity = storageRecordIdentity(input.storage);
+    const transcriptConversationIdentity = transcriptStateIdentity(
+      input.runtime,
+      input.storage,
+    );
 
     const runtimeAliasKey = runtimeConversationIdentity
       ? canonicalConversationKey(
@@ -170,11 +189,11 @@ export class ProviderSessionNormalizer {
           storageConversationIdentity,
         )
       : null;
-    const recordKey = input.storage?.recordId
+    const recordKey = storageRecordConversationIdentity
       ? recordAliasKey(
           input.providerExtensionId,
           workspaceIdentity,
-          input.storage.recordId,
+          storageRecordConversationIdentity,
         )
       : null;
 
@@ -194,14 +213,33 @@ export class ProviderSessionNormalizer {
       runtimeConversationIdentity === storageConversationIdentity;
     const hasHistoricalMerge = runtimeCanonical !== null || storageCanonical !== null;
     const canMergeByRecord = recordCanonical !== null;
+    const ambiguousCrossSource =
+      input.runtime !== undefined &&
+      input.storage !== undefined &&
+      !identitiesMatch &&
+      !hasHistoricalMerge &&
+      !canMergeByRecord &&
+      (runtimeConversationIdentity !== null ||
+        storageConversationIdentity !== null ||
+        storageRecordConversationIdentity !== null);
+    const canUseStorageEvidence =
+      input.storage !== undefined &&
+      (input.runtime === undefined ||
+        identitiesMatch ||
+        hasHistoricalMerge ||
+        canMergeByRecord);
+    const mergedStorage = canUseStorageEvidence ? input.storage : undefined;
 
-    const stableConversationIdentity =
-      runtimeCanonical ??
-      storageCanonical ??
-      recordCanonical ??
-      (identitiesMatch ? runtimeConversationIdentity : null) ??
-      runtimeConversationIdentity ??
-      storageConversationIdentity;
+    const stableConversationIdentity = ambiguousCrossSource
+      ? null
+      : runtimeCanonical ??
+        storageCanonical ??
+        recordCanonical ??
+        (identitiesMatch ? runtimeConversationIdentity : null) ??
+        runtimeConversationIdentity ??
+        storageConversationIdentity ??
+        storageRecordConversationIdentity ??
+        transcriptConversationIdentity;
 
     const identityStable = stableConversationIdentity !== null;
     const conversationIdentity = identityStable ? stableConversationIdentity : null;
@@ -230,7 +268,7 @@ export class ProviderSessionNormalizer {
 
     const degradedFlags = unique([
       ...(input.runtime?.degradedFlags ?? []),
-      ...(input.storage?.degradedFlags ?? []),
+      ...(mergedStorage?.degradedFlags ?? []),
       ...(!identityStable ? ['unstable_session_identity'] : []),
     ]);
 
@@ -238,7 +276,7 @@ export class ProviderSessionNormalizer {
       ? 'not_attachable'
       : mergeAttachability(
           input.runtime?.attachability ??
-            input.storage?.attachability ??
+            mergedStorage?.attachability ??
             'attachable',
           degradedFlags,
         );
@@ -248,19 +286,19 @@ export class ProviderSessionNormalizer {
       providerExtensionId: input.providerExtensionId,
       providerSessionRef:
         input.runtime?.providerSessionRef ??
-        input.storage?.providerSessionRef ??
+        mergedStorage?.providerSessionRef ??
         canonicalConversationIdentity,
       runtimeProviderSessionRef: input.runtime?.providerSessionRef ?? null,
-      storageProviderSessionRef: input.storage?.providerSessionRef ?? null,
+      storageProviderSessionRef: mergedStorage?.providerSessionRef ?? null,
       workspaceIdentity,
       conversationIdentity,
       providerSessionKey: `v1|${input.providerExtensionId}|${workspaceIdentity}|${canonicalConversationIdentity}`,
-      title: input.runtime?.title ?? input.storage?.title ?? 'Untitled session',
-      latestSeq: Math.max(input.runtime?.latestSeq ?? 0, input.storage?.latestSeq ?? 0),
+      title: input.runtime?.title ?? mergedStorage?.title ?? 'Untitled session',
+      latestSeq: Math.max(input.runtime?.latestSeq ?? 0, mergedStorage?.latestSeq ?? 0),
       attachability,
       capabilities: unique([
         ...(input.runtime?.capabilities ?? []),
-        ...(input.storage?.capabilities ?? []),
+        ...(mergedStorage?.capabilities ?? []),
       ]),
       degradedFlags,
       identityStable,

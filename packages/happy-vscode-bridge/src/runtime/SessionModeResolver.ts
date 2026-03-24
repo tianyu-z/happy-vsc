@@ -129,6 +129,9 @@ export class SessionModeResolver {
           effectiveMode = 'runtime';
           modeReason = resolveRuntimeModeReason(runtimeHealth);
         }
+      } else if (storageHealth === 'unavailable') {
+        effectiveMode = 'storage';
+        modeReason = modeReasons.noProbeAvailable;
       } else {
         effectiveMode = 'storage';
         modeReason = modeReasons.runtimeUnavailableFallbackToStorage;
@@ -144,7 +147,7 @@ export class SessionModeResolver {
       modeReason = modeReasons.storageUnavailableFallbackToRuntime;
     } else {
       effectiveMode = 'storage';
-      modeReason = storageSelectedModeReason(false);
+      modeReason = modeReasons.noProbeAvailable;
     }
 
     const baseAttachability =

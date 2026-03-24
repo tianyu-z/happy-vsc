@@ -190,4 +190,26 @@ describe('SessionModeResolver', () => {
     expect(resolved.capabilities).toEqual([]);
     expect(resolved.degradedFlags).toContain('read_only_attach');
   });
+
+  it('emits an explicit failure mode when both probes are unavailable in storage_preferred mode', () => {
+    const resolver = new SessionModeResolver({ now: () => 0 });
+
+    const resolved = resolver.resolve({
+      desiredMode: 'storage_preferred',
+      runtime: {
+        status: 'unavailable',
+        capabilities: [],
+        degradedFlags: [],
+      },
+      storage: {
+        status: 'unavailable',
+        capabilities: [],
+        degradedFlags: [],
+      },
+    });
+
+    expect(resolved.effectiveMode).toBe('storage');
+    expect(resolved.modeReason).toBe('no_probe_available');
+    expect(resolved.attachability).toBe('not_attachable');
+  });
 });
