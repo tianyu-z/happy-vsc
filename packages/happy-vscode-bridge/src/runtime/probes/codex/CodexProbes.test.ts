@@ -116,7 +116,7 @@ async function discoverCodexSession(options: {
   return {
     ...runtimeSession,
     latestSeq: storageMatch?.latestSeq ?? runtimeSession.latestSeq,
-    title: storageMatch?.title ?? runtimeSession.title,
+    title: runtimeSession.title ?? storageMatch?.title,
   };
 }
 
@@ -132,7 +132,7 @@ describe('Codex probes', () => {
     expect(session?.attachability).toBe('attachable_with_degraded_capabilities');
   });
 
-  it('prefers runtime evidence and merges storage metadata', async () => {
+  it('prefers runtime evidence and only falls back to storage metadata when runtime is missing it', async () => {
     const session = await discoverCodexSession({
       runtime: [
         { conversationId: 'codex-42', title: 'runtime-title', latestSeq: 1 },
@@ -144,7 +144,7 @@ describe('Codex probes', () => {
 
     expect(session).toMatchObject({
       conversationId: 'codex-42',
-      title: 'storage-title',
+      title: 'runtime-title',
       latestSeq: 99,
     });
   });
