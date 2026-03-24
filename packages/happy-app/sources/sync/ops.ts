@@ -4,9 +4,9 @@
  */
 
 import { apiSocket } from './apiSocket';
+import { brokerDiscoveredSessionSchema, type BrokerDiscoveredSession } from './brokerTypes';
 import { sync } from './sync';
 import type { MachineMetadata, Metadata } from './storageTypes';
-import { brokerDiscoveredSessionSchema, type BrokerDiscoveredSession } from 'happy-wire';
 
 // Strict type definitions for all operations
 

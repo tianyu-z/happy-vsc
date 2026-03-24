@@ -16,6 +16,23 @@ vi.mock('./sync', () => ({
 
 import { machineAttachBrokerSession, machineListBrokerSessions } from './ops';
 
+function makeRuntimeMetadata() {
+    return {
+        desiredMode: 'runtime_preferred',
+        effectiveMode: 'runtime',
+        modeReason: 'runtime_ready',
+        compatibility: 'supported',
+        providerExtension: {
+            id: 'anthropic.claude-code',
+            version: '1.0.0',
+        },
+        probeHealth: {
+            runtime: 'ready',
+            storage: 'ready',
+        },
+    };
+}
+
 describe('broker session ops', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -31,6 +48,7 @@ describe('broker session ops', () => {
                     attachability: 'attachable',
                     capabilities: ['sendUserMessage'],
                     degradedFlags: [],
+                    ...makeRuntimeMetadata(),
                 },
             ],
         });
@@ -43,6 +61,10 @@ describe('broker session ops', () => {
             {},
         );
         expect(result.sessions[0].provider).toBe('claude');
+        expect(result.sessions[0]).toMatchObject({
+            desiredMode: 'runtime_preferred',
+            effectiveMode: 'runtime',
+        });
     });
 
     it('filters invalid broker session DTOs instead of failing the whole list', async () => {
@@ -55,6 +77,7 @@ describe('broker session ops', () => {
                     attachability: 'attachable',
                     capabilities: ['sendUserMessage'],
                     degradedFlags: [],
+                    ...makeRuntimeMetadata(),
                 },
                 {
                     brokerSessionId: 'broker-sess-2',
@@ -76,6 +99,7 @@ describe('broker session ops', () => {
                     attachability: 'attachable',
                     capabilities: ['sendUserMessage'],
                     degradedFlags: [],
+                    ...makeRuntimeMetadata(),
                 },
             ],
         });

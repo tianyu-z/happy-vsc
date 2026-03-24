@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
     canAttachBrokerSession,
     getBrokerSessionAttachabilityLabel,
+    getBrokerSessionAttachActionLabel,
     getBrokerSessionBadge,
     getBrokerSessionDegradedMessages,
+    getBrokerSessionRuntimeDetails,
     getBrokerSessionMetadataSummary,
     getBrokerSessionProviderLabel,
 } from './brokerSessionUtils';
@@ -74,9 +76,50 @@ describe('brokerSessionUtils', () => {
         );
 
         expect(getBrokerSessionMetadataSummary({
+            sessionSource: 'broker_attached',
+            brokerDesiredMode: 'runtime_preferred',
+            brokerEffectiveMode: 'storage',
+            brokerModeReason: 'runtime_unavailable_fallback_to_storage',
+            brokerCompatibility: 'supported',
+            brokerProviderExtension: {
+                id: 'anthropic.claude-code',
+                version: '1.0.0',
+            },
+            brokerDegradedFlags: ['read_only_attach'],
+        }, translate)).toBe(
+            't:sessionInfo.brokerSource • Desired: Runtime preferred • Active: Storage • Reason: Runtime unavailable, fallback to storage • Compatibility: Supported • Provider: anthropic.claude-code@1.0.0 • t:machine.brokerDegradedFlags.read_only_attach',
+        );
+
+        expect(getBrokerSessionMetadataSummary({
             sessionSource: 'direct',
             brokerDegradedFlags: ['approval_bridge_unavailable'],
         }, translate)).toBeNull();
+    });
+
+    it('formats runtime details and attach action labels for broker session rows', () => {
+        expect(getBrokerSessionRuntimeDetails({
+            desiredMode: 'runtime_preferred',
+            effectiveMode: 'storage',
+            modeReason: 'runtime_unavailable_fallback_to_storage',
+            compatibility: 'supported',
+            providerExtension: {
+                id: 'anthropic.claude-code',
+                version: '1.0.0',
+            },
+        })).toEqual([
+            'Desired: Runtime preferred',
+            'Active: Storage',
+            'Reason: Runtime unavailable, fallback to storage',
+            'Compatibility: Supported',
+            'Provider: anthropic.claude-code@1.0.0',
+        ]);
+
+        expect(getBrokerSessionAttachActionLabel({
+            effectiveMode: 'storage',
+        }, translate)).toBe('t:machine.brokerAttach (Storage)');
+        expect(getBrokerSessionAttachActionLabel({
+            effectiveMode: 'runtime',
+        }, translate)).toBe('t:machine.brokerAttach');
     });
 
     it('formats unknown degraded flags into readable fallback text', () => {

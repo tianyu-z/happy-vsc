@@ -1,13 +1,13 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { View, Text, ActivityIndicator, RefreshControl, Platform, Pressable, TextInput, useWindowDimensions } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import type { BrokerDiscoveredSession } from 'happy-wire';
 import { Item } from '@/components/Item';
 import { ItemGroup } from '@/components/ItemGroup';
 import { ItemList } from '@/components/ItemList';
 import { Typography } from '@/constants/Typography';
 import { useSessions, useMachine, storage } from '@/sync/storage';
 import { Ionicons, AntDesign } from '@expo/vector-icons';
+import type { BrokerDiscoveredSession } from '@/sync/brokerTypes';
 import type { Session } from '@/sync/storageTypes';
 import { machineAttachBrokerSession, machineBash, machineListBrokerSessions, machineStopDaemon, machineUpdateMetadata } from '@/sync/ops';
 import { Modal } from '@/modal';
@@ -16,8 +16,10 @@ import { showToast } from '@/components/Toast';
 import {
     canAttachBrokerSession,
     getBrokerSessionAttachabilityLabel,
+    getBrokerSessionAttachActionLabel,
     getBrokerSessionDegradedMessages,
     getBrokerSessionProviderLabel,
+    getBrokerSessionRuntimeDetails,
 } from '@/utils/brokerSessionUtils';
 import { formatPathRelativeToHome, getSessionName, getSessionSubtitle } from '@/utils/sessionUtils';
 import { isMachineOnline } from '@/utils/machineUtils';
@@ -838,15 +840,16 @@ export default function MachineDetailScreen() {
                                     brokerSession.degradedFlags,
                                     t,
                                 );
+                                const runtimeDetails = getBrokerSessionRuntimeDetails(brokerSession);
                                 const providerLabel = getBrokerSessionProviderLabel(
                                     brokerSession.provider,
                                     t,
                                 );
                                 const subtitle = [
-                                    providerLabel,
-                                    getBrokerSessionAttachabilityLabel(brokerSession, t),
+                                    [providerLabel, getBrokerSessionAttachabilityLabel(brokerSession, t)].join(' • '),
+                                    ...runtimeDetails,
                                     ...degradedMessages,
-                                ].join('\n');
+                                ].filter((line, idx, lines) => line && lines.indexOf(line) === idx).join('\n');
 
                                 return (
                                     <Item
@@ -856,7 +859,7 @@ export default function MachineDetailScreen() {
                                         subtitleLines={0}
                                         onPress={() => void handleAttachBroker(brokerSession)}
                                         loading={attachingBrokerSessionId === brokerSession.brokerSessionId}
-                                        detail={t('machine.brokerAttach')}
+                                        detail={getBrokerSessionAttachActionLabel(brokerSession, t)}
                                         showChevron
                                         showDivider={index < attachableBrokerSessions.length - 1}
                                     />

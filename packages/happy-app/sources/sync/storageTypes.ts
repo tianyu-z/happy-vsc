@@ -43,6 +43,18 @@ export const MetadataSchema = z.object({
     brokerSessionId: z.string().optional(),
     brokerCapabilities: z.array(z.string()).optional(),
     brokerDegradedFlags: z.array(z.string()).optional(),
+    brokerDesiredMode: z.enum(['runtime_preferred', 'storage_preferred']).optional(),
+    brokerEffectiveMode: z.enum(['runtime', 'storage']).optional(),
+    brokerModeReason: z.string().optional(),
+    brokerCompatibility: z.enum(['supported', 'unknown', 'incompatible']).optional(),
+    brokerProviderExtension: z.object({
+        id: z.string(),
+        version: z.string(),
+    }).optional(),
+    brokerProbeHealth: z.object({
+        runtime: z.enum(['ready', 'degraded', 'unavailable']),
+        storage: z.enum(['ready', 'stale', 'unavailable']),
+    }).optional(),
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
     homeDir: z.string().optional(), // User's home directory on the machine
