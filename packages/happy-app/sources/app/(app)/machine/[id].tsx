@@ -7,11 +7,20 @@ import { ItemList } from '@/components/ItemList';
 import { Typography } from '@/constants/Typography';
 import { useSessions, useMachine, storage } from '@/sync/storage';
 import { Ionicons, AntDesign } from '@expo/vector-icons';
+import type { BrokerDiscoveredSession } from '@/sync/brokerTypes';
 import type { Session } from '@/sync/storageTypes';
-import { machineBash, machineStopDaemon, machineUpdateMetadata } from '@/sync/ops';
+import { machineAttachBrokerSession, machineBash, machineListBrokerSessions, machineStopDaemon, machineUpdateMetadata } from '@/sync/ops';
 import { Modal } from '@/modal';
 import { hapticsLight } from '@/components/haptics';
 import { showToast } from '@/components/Toast';
+import {
+    canAttachBrokerSession,
+    getBrokerSessionAttachabilityLabel,
+    getBrokerSessionAttachActionLabel,
+    getBrokerSessionDegradedMessages,
+    getBrokerSessionProviderLabel,
+    getBrokerSessionRuntimeDetails,
+} from '@/utils/brokerSessionUtils';
 import { formatPathRelativeToHome, getSessionName, getSessionSubtitle } from '@/utils/sessionUtils';
 import { isMachineOnline } from '@/utils/machineUtils';
 import { sync } from '@/sync/sync';
@@ -97,6 +106,11 @@ export default function MachineDetailScreen() {
     const [showAllPaths, setShowAllPaths] = useState(false);
     const [sessionType, setSessionType] = useState<'simple' | 'worktree'>('simple');
     const [selectedRepos, setSelectedRepos] = useState<SelectedRepo[]>([]);
+    const [brokerSessions, setBrokerSessions] = useState<BrokerDiscoveredSession[]>([]);
+    const [brokerSessionsLoaded, setBrokerSessionsLoaded] = useState(false);
+    const [brokerSessionsError, setBrokerSessionsError] = useState<string | null>(null);
+    const [isLoadingBrokerSessions, setIsLoadingBrokerSessions] = useState(false);
+    const [attachingBrokerSessionId, setAttachingBrokerSessionId] = useState<string | null>(null);
     const [addDirBranchMenu, setAddDirBranchMenu] = useState<{ visible: boolean; items: ActionMenuItem[] }>({ visible: false, items: [] });
     const addDirBranchResolveRef = useRef<((value: string | undefined) => void) | null>(null);
     const folderPickerRef = useRef<BottomSheetModal>(null);
@@ -135,6 +149,10 @@ export default function MachineDetailScreen() {
             .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
             .slice(0, 5);
     }, [machineSessions]);
+    const attachableBrokerSessions = useMemo(
+        () => brokerSessions.filter((session) => canAttachBrokerSession(session)),
+        [brokerSessions],
+    );
 
     const recentPaths = useMemo(() => {
         const paths = new Set<string>();
@@ -164,6 +182,34 @@ export default function MachineDetailScreen() {
         // Use machine online status as proxy for daemon status
         return isMachineOnline(machine) ? 'likely alive' : 'stopped';
     }, [machine]);
+    const isMachineOnlineNow = Boolean(machine && isMachineOnline(machine));
+
+    const refreshBrokerSessions = useCallback(async () => {
+        if (!machineId || !isMachineOnlineNow) {
+            setBrokerSessions([]);
+            setBrokerSessionsError(null);
+            setBrokerSessionsLoaded(false);
+            setIsLoadingBrokerSessions(false);
+            return;
+        }
+
+        setIsLoadingBrokerSessions(true);
+        try {
+            const result = await machineListBrokerSessions(machineId);
+            setBrokerSessions(result.sessions);
+            setBrokerSessionsError(null);
+        } catch (error) {
+            setBrokerSessions([]);
+            setBrokerSessionsError(t('machine.brokerSessionsUnavailable'));
+        } finally {
+            setBrokerSessionsLoaded(true);
+            setIsLoadingBrokerSessions(false);
+        }
+    }, [isMachineOnlineNow, machineId]);
+
+    useEffect(() => {
+        void refreshBrokerSessions();
+    }, [refreshBrokerSessions]);
 
     const handleStopDaemon = async () => {
         // Show confirmation modal using alert with buttons
@@ -201,8 +247,33 @@ export default function MachineDetailScreen() {
     const handleRefresh = async () => {
         setIsRefreshing(true);
         await sync.refreshMachines();
+        await refreshBrokerSessions();
         setIsRefreshing(false);
     };
+
+    const handleAttachBroker = useCallback(async (brokerSession: BrokerDiscoveredSession) => {
+        if (!machineId || !canAttachBrokerSession(brokerSession)) {
+            return;
+        }
+
+        setAttachingBrokerSessionId(brokerSession.brokerSessionId);
+        try {
+            const result = await machineAttachBrokerSession(machineId, brokerSession.brokerSessionId);
+            switch (result.type) {
+                case 'success':
+                    navigateToSession(result.sessionId);
+                    break;
+                case 'error':
+                    Modal.alert(t('common.error'), result.errorMessage);
+                    break;
+                case 'requestToApproveDirectoryCreation':
+                    Modal.alert(t('common.error'), t('status.operationFailed'));
+                    break;
+            }
+        } finally {
+            setAttachingBrokerSessionId(null);
+        }
+    }, [machineId, navigateToSession]);
 
     const handleRenameMachine = async () => {
         if (!machine || !machineId) return;
@@ -745,6 +816,63 @@ export default function MachineDetailScreen() {
                         onPress={handleAddRepository}
                     />
                 </ItemGroup>
+
+                {machine && isMachineOnlineNow && (brokerSessionsLoaded || isLoadingBrokerSessions) && (
+                    <ItemGroup title={t('machine.brokerSessions')}>
+                        {isLoadingBrokerSessions ? (
+                            <Item
+                                title={t('status.refreshing')}
+                                showChevron={false}
+                                loading
+                            />
+                        ) : brokerSessionsError ? (
+                            <Item
+                                title={t('machine.brokerSessionsUnavailable')}
+                                subtitle={brokerSessionsError}
+                                subtitleLines={0}
+                                onPress={() => void refreshBrokerSessions()}
+                                detail={t('common.retry')}
+                                showChevron={false}
+                            />
+                        ) : attachableBrokerSessions.length > 0 ? (
+                            attachableBrokerSessions.map((brokerSession, index) => {
+                                const degradedMessages = getBrokerSessionDegradedMessages(
+                                    brokerSession.degradedFlags,
+                                    t,
+                                );
+                                const runtimeDetails = getBrokerSessionRuntimeDetails(brokerSession);
+                                const providerLabel = getBrokerSessionProviderLabel(
+                                    brokerSession.provider,
+                                    t,
+                                );
+                                const subtitle = [
+                                    [providerLabel, getBrokerSessionAttachabilityLabel(brokerSession, t)].join(' • '),
+                                    ...runtimeDetails,
+                                    ...degradedMessages,
+                                ].filter((line, idx, lines) => line && lines.indexOf(line) === idx).join('\n');
+
+                                return (
+                                    <Item
+                                        key={brokerSession.brokerSessionId}
+                                        title={brokerSession.title}
+                                        subtitle={subtitle}
+                                        subtitleLines={0}
+                                        onPress={() => void handleAttachBroker(brokerSession)}
+                                        loading={attachingBrokerSessionId === brokerSession.brokerSessionId}
+                                        detail={getBrokerSessionAttachActionLabel(brokerSession, t)}
+                                        showChevron
+                                        showDivider={index < attachableBrokerSessions.length - 1}
+                                    />
+                                );
+                            })
+                        ) : (
+                            <Item
+                                title={t('machine.brokerSessionsEmpty')}
+                                showChevron={false}
+                            />
+                        )}
+                    </ItemGroup>
+                )}
 
                 {/* Previous Sessions (debug view) */}
                 {previousSessions.length > 0 && (

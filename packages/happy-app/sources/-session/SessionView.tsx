@@ -27,6 +27,7 @@ import { tracking, trackMessageSent } from '@/track';
 import { handleImagePasteEvent } from '@/utils/imagePaste';
 import { isRunningOnMac } from '@/utils/platform';
 import { useDeviceType, useHeaderHeight, useIsLandscape, useIsTablet } from '@/utils/responsive';
+import { getBrokerSessionMetadataSummary } from '@/utils/brokerSessionUtils';
 import { formatPathRelativeToHome, generateCopyTitle, getSessionAvatarId, getSessionName, useSessionStatus, copySessionMetadata } from '@/utils/sessionUtils';
 import { isVersionSupported, useLatestCliVersion } from '@/utils/versionUtils';
 import { log } from '@/log';
@@ -129,7 +130,9 @@ export const SessionView = React.memo((props: { id: string }) => {
         const isConnected = session.presence === 'online';
         return {
             title: getSessionName(session),
-            subtitle: session.metadata?.path ? formatPathRelativeToHome(session.metadata.path, session.metadata?.homeDir) : undefined,
+            subtitle: session.metadata?.path
+                ? formatPathRelativeToHome(session.metadata.path, session.metadata?.homeDir)
+                : undefined,
             avatarId: getSessionAvatarId(session),
             onAvatarPress: () => router.push(`/session/${sessionId}/info`),
             isConnected: isConnected,
@@ -797,6 +800,29 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             onDelete={handleDeletePending}
         />
     ) : null;
+    const brokerMetadataSummary = React.useMemo(
+        () => getBrokerSessionMetadataSummary(session.metadata, t),
+        [session.metadata],
+    );
+    const brokerMetadataNotice = brokerMetadataSummary ? (
+        <View style={{
+            paddingHorizontal: 16,
+            paddingBottom: 4,
+        }}>
+            <Text style={{
+                fontSize: 11,
+                color: session.metadata?.brokerDegradedFlags?.length ? theme.colors.textDestructive : theme.colors.textSecondary,
+            }}>
+                {brokerMetadataSummary}
+            </Text>
+        </View>
+    ) : null;
+    const betweenContentAndInput = (
+        <>
+            {pendingQueuePanel}
+            {brokerMetadataNotice}
+        </>
+    );
 
     const input = canEdit ? (
         <AgentInput
@@ -976,7 +1002,7 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
                     content={content}
                     input={input}
                     placeholder={placeholder}
-                    betweenContentAndInput={pendingQueuePanel}
+                    betweenContentAndInput={betweenContentAndInput}
                 />
             </View >
 

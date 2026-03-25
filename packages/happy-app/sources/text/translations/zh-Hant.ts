@@ -826,6 +826,10 @@ export const zhHant: TranslationStructure = {
         renameSessionSuccess: '工作階段重新命名成功',
         failedToRenameSession: '重新命名工作階段失敗',
         pinSessionTitle: '釘選標題（防止 AI 自動更新）',
+        brokerSource: 'Broker',
+        brokerAttached: 'Broker attached',
+        brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
+        brokerLimitedCapabilities: 'Limited broker capabilities',
         worktree: {
             title: 'Worktree',
             branch: '分支',
@@ -1338,6 +1342,26 @@ export const zhHant: TranslationStructure = {
         addRepository: '新增儲存庫',
         worktreeAutoPath: '由工作區自動管理',
         previousSessions: ({ count }: { count: number }) => `歷史工作階段（最近 ${count} 個）`,
+        brokerSessions: 'VS Code Companion Sessions',
+        brokerSessionsUnavailable: 'Unable to load broker sessions',
+        brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
+        brokerAttach: 'Attach',
+        brokerProvider: {
+            claude: 'Claude',
+            codex: 'Codex',
+        },
+        brokerAttachability: {
+            attachable: '可直接附著',
+            attachable_with_degraded_capabilities: '可附著，但控制受限',
+            not_attachable: '不可附著',
+        },
+        brokerDegradedFlags: {
+            read_only_attach: '只讀附著',
+            interrupt_bridge_unavailable: '中斷操作仍需在 VS Code 中處理',
+            approval_bridge_unavailable: '審批請求仍需在 VS Code 中處理',
+            attachment_bridge_unavailable: '附件仍需在 VS Code 中處理',
+            selection_context_stale: '編輯器選取上下文可能已過期',
+        },
     },
 
     repoEdit: {

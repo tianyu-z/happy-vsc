@@ -1,0 +1,115 @@
+{
+  "name": "happy-vscode-bridge",
+  "publisher": "happy",
+  "displayName": "Happy Companion",
+  "description": "VS Code extension bridge for the Happy Companion broker.",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/extension.cjs",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "activationEvents": [
+    "*",
+    "onCommand:happyVscodeBridge.refreshSessions"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "happyVscodeBridge",
+          "title": "Happy Companion",
+          "icon": "resources/bridge.svg"
+        }
+      ]
+    },
+    "views": {
+      "happyVscodeBridge": [
+        {
+          "id": "happyVscodeBridge.sessions",
+          "name": "Sessions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "happyVscodeBridge.startBroker",
+        "title": "Happy Companion: Start Broker",
+        "icon": "$(play)"
+      },
+      {
+        "command": "happyVscodeBridge.stopBroker",
+        "title": "Happy Companion: Stop Broker",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "happyVscodeBridge.refreshSessions",
+        "title": "Happy Companion: Refresh Sessions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "happyVscodeBridge.switchSessionMode",
+        "title": "Happy Companion: Switch Session Mode"
+      },
+      {
+        "command": "happyVscodeBridge.diagnoseProviders",
+        "title": "Happy Companion: Diagnose Providers",
+        "icon": "$(output)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "happyVscodeBridge.refreshSessions",
+          "when": "view == happyVscodeBridge.sessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "happyVscodeBridge.startBroker",
+          "when": "view == happyVscodeBridge.sessions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "happyVscodeBridge.stopBroker",
+          "when": "view == happyVscodeBridge.sessions",
+          "group": "navigation@3"
+        },
+        {
+          "command": "happyVscodeBridge.diagnoseProviders",
+          "when": "view == happyVscodeBridge.sessions",
+          "group": "navigation@4"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "happyVscodeBridge.sessions",
+        "contents": "No live Claude Code or Codex sessions were discovered in this window.\n[Refresh Sessions](command:happyVscodeBridge.refreshSessions) [Start Broker](command:happyVscodeBridge.startBroker)"
+      },
+      {
+        "view": "happyVscodeBridge.sessions",
+        "contents": "Start an official Claude Code or Codex session in this same VS Code window, then refresh to attach through Happy Companion."
+      }
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "build": "node ./esbuild.mjs",
+    "prepackage:vsix": "node ./esbuild.mjs",
+    "package:vsix": "vsce package --no-dependencies",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "happy-wire": "*",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.30",
+    "@types/ws": "^8.18.1",
+    "@vscode/vsce": "^3.7.1",
+    "esbuild": "^0.27.4",
+    "typescript": "5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

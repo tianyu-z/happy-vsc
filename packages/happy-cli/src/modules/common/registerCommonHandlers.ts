@@ -120,10 +120,14 @@ interface DifftasticResponse {
 export interface SpawnSessionOptions {
     machineId?: string;
     directory: string;
+    source?: 'direct' | 'broker_attached';
     sessionId?: string;
     resumeSessionId?: string;
     sessionTitle?: string;
     skipForkSession?: boolean;
+    brokerSessionId?: string;
+    brokerUrl?: string;
+    brokerRootDir?: string;
     approvedNewDirectoryCreation?: boolean;
     agent?: 'claude' | 'codex' | 'gemini';
     token?: string;

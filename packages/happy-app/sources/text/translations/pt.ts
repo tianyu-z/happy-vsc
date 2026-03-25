@@ -824,6 +824,10 @@ export const pt: TranslationStructure = {
         renameSessionSuccess: 'Sessão renomeada com sucesso',
         failedToRenameSession: 'Falha ao renomear sessão',
         pinSessionTitle: 'Fixar título (impedir atualização automática pela IA)',
+        brokerSource: 'Broker',
+        brokerAttached: 'Broker attached',
+        brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
+        brokerLimitedCapabilities: 'Limited broker capabilities',
         worktree: {
             title: 'Worktree',
             branch: 'Branch',
@@ -1336,6 +1340,26 @@ export const pt: TranslationStructure = {
         addRepository: 'Adicionar repositório',
         worktreeAutoPath: 'Gerenciado automaticamente pelo workspace',
         previousSessions: ({ count }: { count: number }) => `Sessões anteriores (até ${count} mais recentes)`,
+        brokerSessions: 'VS Code Companion Sessions',
+        brokerSessionsUnavailable: 'Unable to load broker sessions',
+        brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
+        brokerAttach: 'Attach',
+        brokerProvider: {
+            claude: 'Claude',
+            codex: 'Codex',
+        },
+        brokerAttachability: {
+            attachable: 'Ready to attach',
+            attachable_with_degraded_capabilities: 'Attach with limited control',
+            not_attachable: 'Not attachable',
+        },
+        brokerDegradedFlags: {
+            read_only_attach: 'Read-only attach',
+            interrupt_bridge_unavailable: 'Interrupts stay in VS Code',
+            approval_bridge_unavailable: 'Approval requests stay in VS Code',
+            attachment_bridge_unavailable: 'Attachments stay in VS Code',
+            selection_context_stale: 'Editor selection may be stale',
+        },
     },
 
     repoEdit: {

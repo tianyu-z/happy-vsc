@@ -111,6 +111,69 @@ async function spawnAndWaitForDaemon(): Promise<boolean> {
       process.exit(1)
     }
     return;
+  } else if (subcommand === 'broker-attached-session') {
+    try {
+      const { runBrokerAttachedSession } = await import('@/broker/runBrokerAttachedSession');
+
+      let startedBy: 'daemon' | 'terminal' | undefined = undefined;
+      let brokerRootDir: string | undefined = undefined;
+      let brokerUrl: string | undefined = undefined;
+      let brokerSessionId: string | undefined = undefined;
+
+      for (let i = 1; i < args.length; i++) {
+        if (args[i] === '--started-by') {
+          startedBy = args[++i] as 'daemon' | 'terminal';
+          continue;
+        }
+        if (args[i] === '--broker-root-dir') {
+          brokerRootDir = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-url') {
+          brokerUrl = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-session-id') {
+          brokerSessionId = args[++i];
+          continue;
+        }
+      }
+
+      if (!brokerSessionId) {
+        throw new Error('Missing required argument: --broker-session-id');
+      }
+
+      const {
+        credentials
+      } = await authAndSetupMachineIfNeeded();
+
+      logger.debug('Ensuring Happy background service is running & matches our version...');
+      if (!(await isDaemonRunningCurrentlyInstalledHappyVersion())) {
+        logger.debug('Starting Happy background service...');
+        const daemonProcess = spawnHappyCLI(['daemon', 'start-sync'], {
+          detached: true,
+          stdio: 'ignore',
+          env: process.env
+        });
+        daemonProcess.unref();
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      await runBrokerAttachedSession({
+        credentials,
+        startedBy,
+        brokerRootDir,
+        brokerUrl,
+        brokerSessionId,
+      });
+    } catch (error) {
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error');
+      if (process.env.DEBUG) {
+        console.error(error);
+      }
+      process.exit(1);
+    }
+    return;
   } else if (subcommand === 'codex') {
     // Handle codex command
     try {

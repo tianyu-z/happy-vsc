@@ -17,6 +17,8 @@ import { writeDaemonState, DaemonLocallyPersistedState, readDaemonState, acquire
 
 import { cleanupDaemonState, isDaemonRunningCurrentlyInstalledHappyVersion, stopDaemon } from './controlClient';
 import { startDaemonControlServer } from './controlServer';
+import { findReusableBrokerSession } from './brokerSessionReuse';
+import { buildSpawnEnvironment, waitForSessionWebhook } from './sessionStartup';
 import { readFileSync } from 'fs';
 import { execSync, exec, type ChildProcess } from 'child_process';
 import { join } from 'path';
@@ -515,6 +517,208 @@ export async function startDaemon(): Promise<void> {
       const { directory, sessionId, resumeSessionId, sessionTitle, skipForkSession, machineId, approvedNewDirectoryCreation = true } = options;
       const isClaudeAgent = !options.agent || options.agent === 'claude';
       let directoryCreated = false;
+      const resolveProfileEnv = async (): Promise<Record<string, string>> => {
+        let profileEnv: Record<string, string> = {};
+
+        if (options.environmentVariables && Object.keys(options.environmentVariables).length > 0) {
+          profileEnv = options.environmentVariables;
+          logger.info(`[DAEMON RUN] Using GUI-provided profile environment variables (${Object.keys(profileEnv).length} vars)`);
+          logger.debug(`[DAEMON RUN] GUI profile env var keys: ${Object.keys(profileEnv).join(', ')}`);
+        } else {
+          try {
+            const settings = await readSettings();
+            if (settings.activeProfileId) {
+              logger.debug(`[DAEMON RUN] No GUI profile provided, loading CLI local active profile: ${settings.activeProfileId}`);
+              profileEnv = await getProfileEnvironmentVariablesForAgent(
+                settings.activeProfileId,
+                options.agent || 'claude'
+              );
+
+              logger.debug(`[DAEMON RUN] Loaded ${Object.keys(profileEnv).length} environment variables from CLI local profile for agent ${options.agent || 'claude'}`);
+              logger.debug(`[DAEMON RUN] CLI profile env var keys: ${Object.keys(profileEnv).join(', ')}`);
+            } else {
+              logger.debug('[DAEMON RUN] No CLI local active profile set');
+            }
+          } catch (error) {
+            logger.debug('[DAEMON RUN] Failed to load CLI local profile environment variables:', error);
+          }
+        }
+
+        return profileEnv;
+      };
+
+      const applySharedSpawnMetadataEnv = (baseEnv: Record<string, string>): Record<string, string> => {
+        let nextExtraEnv = { ...baseEnv };
+        if (sessionTitle) {
+          nextExtraEnv.HAPPY_SESSION_TITLE = sessionTitle;
+        }
+        if (options.worktreeBasePath) {
+          nextExtraEnv.HAPPY_WORKTREE_BASE_PATH = options.worktreeBasePath;
+        }
+        if (options.worktreeBranchName) {
+          nextExtraEnv.HAPPY_WORKTREE_BRANCH_NAME = options.worktreeBranchName;
+        }
+        if (options.workspaceRepos && options.workspaceRepos.length > 0) {
+          nextExtraEnv.HAPPY_WORKSPACE_REPOS = JSON.stringify(options.workspaceRepos);
+        }
+        if (options.workspacePath) {
+          nextExtraEnv.HAPPY_WORKSPACE_PATH = options.workspacePath;
+        }
+        if (options.mcpServers && options.mcpServers.length > 0) {
+          nextExtraEnv.HAPPY_EXTRA_MCP_SERVERS = JSON.stringify(options.mcpServers);
+        }
+        return nextExtraEnv;
+      };
+
+      const resolveExtraEnv = async (): Promise<{ extraEnv: Record<string, string> } | SpawnSessionResult> => {
+        const authEnv: Record<string, string> = {};
+        if (options.token) {
+          if (options.agent === 'codex') {
+            const codexHomeDir = tmp.dirSync();
+            fs.writeFile(join(codexHomeDir.name, 'auth.json'), options.token);
+            authEnv.CODEX_HOME = codexHomeDir.name;
+          } else {
+            authEnv.CLAUDE_CODE_OAUTH_TOKEN = options.token;
+          }
+        }
+
+        const profileEnv = await resolveProfileEnv();
+        let nextExtraEnv = applySharedSpawnMetadataEnv({ ...profileEnv, ...authEnv });
+        if (resumeSessionId && isClaudeAgent) {
+          nextExtraEnv.HAPPY_CLAUDE_BACKFILL = '1';
+          nextExtraEnv.HAPPY_CLAUDE_BACKFILL_MAX_MESSAGES = '200';
+          nextExtraEnv.HAPPY_CLAUDE_BACKFILL_MAX_USER_MESSAGES = '20';
+          nextExtraEnv.HAPPY_CLAUDE_RESUME_SESSION_ID = resumeSessionId;
+          if (skipForkSession) {
+            nextExtraEnv.HAPPY_CLAUDE_SKIP_FORK_SESSION = '1';
+          }
+        }
+        if (resumeSessionId && options.agent === 'gemini') {
+          nextExtraEnv.HAPPY_GEMINI_RESUME_SESSION_ID = resumeSessionId;
+          nextExtraEnv.HAPPY_GEMINI_BACKFILL = '1';
+        }
+        if (resumeSessionId && options.agent === 'codex') {
+          nextExtraEnv.HAPPY_CODEX_RESUME_FILE = resumeSessionId;
+          nextExtraEnv.HAPPY_CODEX_BACKFILL = '1';
+        }
+        logger.debug(`[DAEMON RUN] Final environment variable keys (before expansion) (${Object.keys(nextExtraEnv).length}): ${Object.keys(nextExtraEnv).join(', ')}`);
+
+        nextExtraEnv = expandEnvironmentVariables(nextExtraEnv, process.env);
+        logger.debug(`[DAEMON RUN] After variable expansion: ${Object.keys(nextExtraEnv).join(', ')}`);
+
+        const potentialAuthVars = ['ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_HOME', 'AZURE_OPENAI_API_KEY', 'TOGETHER_API_KEY'];
+        const unexpandedAuthVars = potentialAuthVars.filter(varName => {
+          const value = nextExtraEnv[varName];
+          return value && typeof value === 'string' && value.includes('${');
+        });
+
+        if (unexpandedAuthVars.length > 0) {
+          const missingVarDetails = unexpandedAuthVars.map(authVar => {
+            const value = nextExtraEnv[authVar];
+            const unresolvedMatch = value?.match(/\$\{([A-Z_][A-Z0-9_]*)(:-[^}]*)?\}/);
+            const missingVar = unresolvedMatch ? unresolvedMatch[1] : 'unknown';
+            return `${authVar} references \${${missingVar}} which is not defined`;
+          });
+
+          const errorMessage = `Authentication will fail - environment variables not found in daemon: ${missingVarDetails.join('; ')}. ` +
+            `Ensure these variables are set in the daemon's environment (not just your shell) before starting sessions.`;
+          logger.warn(`[DAEMON RUN] ${errorMessage}`);
+          return {
+            type: 'error',
+            errorMessage
+          };
+        }
+
+        return { extraEnv: nextExtraEnv };
+      };
+
+      const resolveBrokerAttachEnv = async (): Promise<Record<string, string>> => {
+        const profileEnv = await resolveProfileEnv();
+        let nextExtraEnv = applySharedSpawnMetadataEnv({ ...profileEnv });
+        logger.debug(`[DAEMON RUN] Broker attach environment variable keys (before expansion) (${Object.keys(nextExtraEnv).length}): ${Object.keys(nextExtraEnv).join(', ')}`);
+        nextExtraEnv = expandEnvironmentVariables(nextExtraEnv, process.env);
+        logger.debug(`[DAEMON RUN] Broker attach environment variable keys (after expansion) (${Object.keys(nextExtraEnv).length}): ${Object.keys(nextExtraEnv).join(', ')}`);
+        return nextExtraEnv;
+      };
+
+      if (options.source === 'broker_attached') {
+        if (!options.brokerSessionId) {
+          return {
+            type: 'error',
+            errorMessage: 'brokerSessionId is required for broker_attached sessions',
+          };
+        }
+        const reusableSession = findReusableBrokerSession(
+          pidToTrackedSession,
+          options.brokerSessionId,
+        );
+        if (reusableSession?.happySessionId) {
+          return {
+            type: 'success',
+            sessionId: reusableSession.happySessionId,
+          };
+        }
+
+        const brokerAttachArgs = [
+          'broker-attached-session',
+          '--started-by', 'daemon',
+          '--broker-session-id', options.brokerSessionId,
+        ];
+
+        if (options.brokerRootDir) {
+          brokerAttachArgs.push('--broker-root-dir', options.brokerRootDir);
+        }
+        if (options.brokerUrl) {
+          brokerAttachArgs.push('--broker-url', options.brokerUrl);
+        }
+
+        const brokerExtraEnv = await resolveBrokerAttachEnv();
+
+        const brokerAttachProcess = spawnHappyCLI(brokerAttachArgs, {
+          cwd: options.brokerRootDir ?? directory,
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: buildSpawnEnvironment(process.env, brokerExtraEnv),
+        });
+
+        if (!brokerAttachProcess.pid) {
+          return {
+            type: 'error',
+            errorMessage: 'Failed to spawn broker-attached Happy process - no PID returned',
+          };
+        }
+
+        const trackedSession: TrackedSession = {
+          startedBy: 'daemon',
+          source: 'broker_attached',
+          brokerSessionId: options.brokerSessionId,
+          pid: brokerAttachProcess.pid,
+          childProcess: brokerAttachProcess,
+        };
+
+        pidToTrackedSession.set(brokerAttachProcess.pid, trackedSession);
+
+        brokerAttachProcess.on('exit', (code, signal) => {
+          logger.debug(`[DAEMON RUN] Broker attach child PID ${brokerAttachProcess.pid} exited with code ${code}, signal ${signal}`);
+          if (brokerAttachProcess.pid) {
+            onChildExited(brokerAttachProcess.pid);
+          }
+        });
+
+        brokerAttachProcess.on('error', (error) => {
+          logger.debug(`[DAEMON RUN] Failed to spawn broker attach child: ${error.message}`);
+          if (brokerAttachProcess.pid) {
+            onChildExited(brokerAttachProcess.pid);
+          }
+        });
+
+        return waitForSessionWebhook({
+          pid: brokerAttachProcess.pid,
+          pidToAwaiter,
+          childProcess: brokerAttachProcess,
+          label: 'broker-attached',
+        });
+      }
 
       try {
         await fs.access(directory);
@@ -559,140 +763,14 @@ export async function startDaemon(): Promise<void> {
         }
       }
 
+      const extraEnvResult = await resolveExtraEnv();
+      if ('type' in extraEnvResult) {
+        return extraEnvResult;
+      }
+
+      const { extraEnv } = extraEnvResult;
+
       try {
-
-        // Build environment variables with explicit precedence layers:
-        // Layer 1 (base): Authentication tokens - protected, cannot be overridden
-        // Layer 2 (middle): Profile environment variables - GUI profile OR CLI local profile
-        // Layer 3 (top): Auth tokens again to ensure they're never overridden
-
-        // Layer 1: Resolve authentication token if provided
-        const authEnv: Record<string, string> = {};
-        if (options.token) {
-          if (options.agent === 'codex') {
-
-            // Create a temporary directory for Codex
-            const codexHomeDir = tmp.dirSync();
-
-            // Write the token to the temporary directory
-            fs.writeFile(join(codexHomeDir.name, 'auth.json'), options.token);
-
-            // Set the environment variable for Codex
-            authEnv.CODEX_HOME = codexHomeDir.name;
-          } else { // Assuming claude
-            authEnv.CLAUDE_CODE_OAUTH_TOKEN = options.token;
-          }
-        }
-
-        // Layer 2: Profile environment variables
-        // Priority: GUI-provided profile > CLI local active profile > none
-        let profileEnv: Record<string, string> = {};
-
-        if (options.environmentVariables && Object.keys(options.environmentVariables).length > 0) {
-          // GUI provided profile environment variables - highest priority for profile settings
-          profileEnv = options.environmentVariables;
-          logger.info(`[DAEMON RUN] Using GUI-provided profile environment variables (${Object.keys(profileEnv).length} vars)`);
-          logger.debug(`[DAEMON RUN] GUI profile env var keys: ${Object.keys(profileEnv).join(', ')}`);
-        } else {
-          // Fallback to CLI local active profile
-          try {
-            const settings = await readSettings();
-            if (settings.activeProfileId) {
-              logger.debug(`[DAEMON RUN] No GUI profile provided, loading CLI local active profile: ${settings.activeProfileId}`);
-
-              // Get profile environment variables filtered for agent compatibility
-              profileEnv = await getProfileEnvironmentVariablesForAgent(
-                settings.activeProfileId,
-                options.agent || 'claude'
-              );
-
-              logger.debug(`[DAEMON RUN] Loaded ${Object.keys(profileEnv).length} environment variables from CLI local profile for agent ${options.agent || 'claude'}`);
-              logger.debug(`[DAEMON RUN] CLI profile env var keys: ${Object.keys(profileEnv).join(', ')}`);
-            } else {
-              logger.debug('[DAEMON RUN] No CLI local active profile set');
-            }
-          } catch (error) {
-            logger.debug('[DAEMON RUN] Failed to load CLI local profile environment variables:', error);
-            // Continue without profile env vars - this is not a fatal error
-          }
-        }
-
-        // Final merge: Profile vars first, then auth (auth takes precedence to protect authentication)
-        let extraEnv = { ...profileEnv, ...authEnv };
-        if (resumeSessionId && isClaudeAgent) {
-          extraEnv.HAPPY_CLAUDE_BACKFILL = '1';
-          extraEnv.HAPPY_CLAUDE_BACKFILL_MAX_MESSAGES = '200';
-          extraEnv.HAPPY_CLAUDE_BACKFILL_MAX_USER_MESSAGES = '20';
-          extraEnv.HAPPY_CLAUDE_RESUME_SESSION_ID = resumeSessionId;
-          if (skipForkSession) {
-            extraEnv.HAPPY_CLAUDE_SKIP_FORK_SESSION = '1';
-          }
-        }
-        if (resumeSessionId && options.agent === 'gemini') {
-          extraEnv.HAPPY_GEMINI_RESUME_SESSION_ID = resumeSessionId;
-          extraEnv.HAPPY_GEMINI_BACKFILL = '1';
-        }
-        if (resumeSessionId && options.agent === 'codex') {
-          extraEnv.HAPPY_CODEX_RESUME_FILE = resumeSessionId;
-          extraEnv.HAPPY_CODEX_BACKFILL = '1';
-        }
-        // Session title - passed to all agents (Claude, Codex, Gemini)
-        if (sessionTitle) {
-          extraEnv.HAPPY_SESSION_TITLE = sessionTitle;
-        }
-        // Worktree metadata - passed to agent process so initial metadata includes it
-        if (options.worktreeBasePath) {
-          extraEnv.HAPPY_WORKTREE_BASE_PATH = options.worktreeBasePath;
-        }
-        if (options.worktreeBranchName) {
-          extraEnv.HAPPY_WORKTREE_BRANCH_NAME = options.worktreeBranchName;
-        }
-        // Multi-repo workspace metadata
-        if (options.workspaceRepos && options.workspaceRepos.length > 0) {
-          extraEnv.HAPPY_WORKSPACE_REPOS = JSON.stringify(options.workspaceRepos);
-        }
-        if (options.workspacePath) {
-          extraEnv.HAPPY_WORKSPACE_PATH = options.workspacePath;
-        }
-        // Extra MCP servers (e.g., DooTask MCP) - serialized as JSON env var
-        if (options.mcpServers && options.mcpServers.length > 0) {
-          extraEnv.HAPPY_EXTRA_MCP_SERVERS = JSON.stringify(options.mcpServers);
-        }
-        logger.debug(`[DAEMON RUN] Final environment variable keys (before expansion) (${Object.keys(extraEnv).length}): ${Object.keys(extraEnv).join(', ')}`);
-
-        // Expand ${VAR} references from daemon's process.env
-        // This ensures variable substitution works in both tmux and non-tmux modes
-        // Example: ANTHROPIC_AUTH_TOKEN="${Z_AI_AUTH_TOKEN}" → ANTHROPIC_AUTH_TOKEN="sk-real-key"
-        extraEnv = expandEnvironmentVariables(extraEnv, process.env);
-        logger.debug(`[DAEMON RUN] After variable expansion: ${Object.keys(extraEnv).join(', ')}`);
-
-        // Fail-fast validation: Check that any auth variables present are fully expanded
-        // Only validate variables that are actually set (different agents need different auth)
-        const potentialAuthVars = ['ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY', 'CODEX_HOME', 'AZURE_OPENAI_API_KEY', 'TOGETHER_API_KEY'];
-        const unexpandedAuthVars = potentialAuthVars.filter(varName => {
-          const value = extraEnv[varName];
-          // Only fail if variable IS SET and contains unexpanded ${VAR} references
-          return value && typeof value === 'string' && value.includes('${');
-        });
-
-        if (unexpandedAuthVars.length > 0) {
-          // Extract the specific missing variable names from unexpanded references
-          const missingVarDetails = unexpandedAuthVars.map(authVar => {
-            const value = extraEnv[authVar];
-            const unresolvedMatch = value?.match(/\$\{([A-Z_][A-Z0-9_]*)(:-[^}]*)?\}/);
-            const missingVar = unresolvedMatch ? unresolvedMatch[1] : 'unknown';
-            return `${authVar} references \${${missingVar}} which is not defined`;
-          });
-
-          const errorMessage = `Authentication will fail - environment variables not found in daemon: ${missingVarDetails.join('; ')}. ` +
-            `Ensure these variables are set in the daemon's environment (not just your shell) before starting sessions.`;
-          logger.warn(`[DAEMON RUN] ${errorMessage}`);
-          return {
-            type: 'error',
-            errorMessage
-          };
-        }
-
         // Execute setup scripts before spawning AI agent
         if (options.repoScripts && options.repoScripts.length > 0) {
           const sequentialScripts = options.repoScripts.filter(s => s.setupScript && !s.parallelSetup);
@@ -809,26 +887,10 @@ export async function startDaemon(): Promise<void> {
             // Wait for webhook to populate session with happySessionId (exact same as regular flow)
             logger.debug(`[DAEMON RUN] Waiting for session webhook for PID ${tmuxResult.pid} (tmux)`);
 
-            return new Promise((resolve) => {
-              // Set timeout for webhook (same as regular flow)
-              const timeout = setTimeout(() => {
-                pidToAwaiter.delete(tmuxResult.pid!);
-                logger.debug(`[DAEMON RUN] Session webhook timeout for PID ${tmuxResult.pid} (tmux)`);
-                resolve({
-                  type: 'error',
-                  errorMessage: `Session webhook timeout for PID ${tmuxResult.pid} (tmux)`
-                });
-              }, 15_000); // Same timeout as regular sessions
-
-              // Register awaiter for tmux session (exact same as regular flow)
-              pidToAwaiter.set(tmuxResult.pid!, (completedSession) => {
-                clearTimeout(timeout);
-                logger.debug(`[DAEMON RUN] Session ${completedSession.happySessionId} fully spawned with webhook (tmux)`);
-                resolve({
-                  type: 'success',
-                  sessionId: completedSession.happySessionId!
-                });
-              });
+            return waitForSessionWebhook({
+              pid: tmuxResult.pid,
+              pidToAwaiter,
+              label: 'tmux',
             });
           } else {
             logger.debug(`[DAEMON RUN] Failed to spawn in tmux: ${tmuxResult.error}, falling back to regular spawning`);
@@ -877,10 +939,7 @@ export async function startDaemon(): Promise<void> {
             cwd: directory,
             detached: true,  // Sessions stay alive when daemon stops
             stdio: ['ignore', 'pipe', 'pipe'],  // Capture stdout/stderr for debugging
-            env: {
-              ...process.env,
-              ...extraEnv
-            }
+            env: buildSpawnEnvironment(process.env, extraEnv)
           });
 
           // Log output for debugging
@@ -931,28 +990,10 @@ export async function startDaemon(): Promise<void> {
           // Wait for webhook to populate session with happySessionId
           logger.debug(`[DAEMON RUN] Waiting for session webhook for PID ${happyProcess.pid}`);
 
-          return new Promise((resolve) => {
-            // Set timeout for webhook
-            const timeout = setTimeout(() => {
-              pidToAwaiter.delete(happyProcess.pid!);
-              logger.debug(`[DAEMON RUN] Session webhook timeout for PID ${happyProcess.pid}`);
-              resolve({
-                type: 'error',
-                errorMessage: `Session webhook timeout for PID ${happyProcess.pid}`
-              });
-              // 15 second timeout - I have seen timeouts on 10 seconds
-              // even though session was still created successfully in ~2 more seconds
-            }, 15_000);
-
-            // Register awaiter
-            pidToAwaiter.set(happyProcess.pid!, (completedSession) => {
-              clearTimeout(timeout);
-              logger.debug(`[DAEMON RUN] Session ${completedSession.happySessionId} fully spawned with webhook`);
-              resolve({
-                type: 'success',
-                sessionId: completedSession.happySessionId!
-              });
-            });
+          return waitForSessionWebhook({
+            pid: happyProcess.pid,
+            pidToAwaiter,
+            childProcess: happyProcess,
           });
         }
 

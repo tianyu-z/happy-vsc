@@ -856,6 +856,10 @@ export const ja: TranslationStructure = {
         renameSessionSuccess: 'セッション名が正常に変更されました',
         failedToRenameSession: 'セッション名の変更に失敗しました',
         pinSessionTitle: 'タイトルを固定（AIの自動更新を防止）',
+        brokerSource: 'Broker',
+        brokerAttached: 'Broker attached',
+        brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
+        brokerLimitedCapabilities: 'Limited broker capabilities',
         worktree: {
             title: 'Worktree',
             branch: 'ブランチ',
@@ -1368,6 +1372,26 @@ export const ja: TranslationStructure = {
         addRepository: 'リポジトリを追加',
         worktreeAutoPath: 'ワークスペースが自動管理',
         previousSessions: ({ count }: { count: number }) => `過去のセッション（最新${count}件）`,
+        brokerSessions: 'VS Code Companion Sessions',
+        brokerSessionsUnavailable: 'Unable to load broker sessions',
+        brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
+        brokerAttach: 'Attach',
+        brokerProvider: {
+            claude: 'Claude',
+            codex: 'Codex',
+        },
+        brokerAttachability: {
+            attachable: 'Ready to attach',
+            attachable_with_degraded_capabilities: 'Attach with limited control',
+            not_attachable: 'Not attachable',
+        },
+        brokerDegradedFlags: {
+            read_only_attach: 'Read-only attach',
+            interrupt_bridge_unavailable: 'Interrupts stay in VS Code',
+            approval_bridge_unavailable: 'Approval requests stay in VS Code',
+            attachment_bridge_unavailable: 'Attachments stay in VS Code',
+            selection_context_stale: 'Editor selection may be stale',
+        },
     },
 
     repoEdit: {
