@@ -40,6 +40,14 @@ export class BrokerEventStream {
     const socket = new WebSocket(this.url);
     const id = `subscribeEvents-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.socket = socket;
+    const clearSocketIfCurrent = () => {
+      if (this.socket !== socket) {
+        return;
+      }
+
+      this.detachSocketListeners(socket);
+      this.socket = null;
+    };
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -62,6 +70,8 @@ export class BrokerEventStream {
 
           settled = true;
           cleanupSubscribeHandlers();
+          socket.on('close', clearSocketIfCurrent);
+          socket.on('error', clearSocketIfCurrent);
           resolve();
         };
 
@@ -84,30 +94,45 @@ export class BrokerEventStream {
         };
 
         const handleMessage = (raw: WebSocket.RawData) => {
+          let message: Partial<RpcSuccess & RpcError>;
           try {
-            const message = JSON.parse(String(raw)) as Partial<RpcSuccess & RpcError>;
+            message = JSON.parse(String(raw)) as Partial<RpcSuccess & RpcError>;
+          } catch {
+            // Ignore malformed frames that are unrelated to the subscription handshake.
+            return;
+          }
 
-            if (message.id === id) {
-              if (message.error) {
-                fail(
-                  new Error(
-                    message.error.message ?? 'Broker subscribeEvents request failed',
-                  ),
-                );
-                return;
-              }
-
-              z.literal(true).parse(message.result);
-              succeed();
+          if (message.id === id) {
+            if (message.error) {
+              fail(
+                new Error(
+                  message.error.message ?? 'Broker subscribeEvents request failed',
+                ),
+              );
               return;
             }
 
-            const notification = brokerEventNotificationSchema.parse(message);
-            if (notification.params.brokerSessionId === brokerSessionId) {
-              onEvent(notification.params.entry);
+            try {
+              z.literal(true).parse(message.result);
+            } catch (error) {
+              fail(error);
+              return;
             }
+
+            succeed();
+            return;
+          }
+
+          let notification;
+          try {
+            notification = brokerEventNotificationSchema.parse(message);
           } catch {
-            // Ignore unrelated and malformed messages.
+            // Ignore unrelated and malformed notifications.
+            return;
+          }
+
+          if (notification.params.brokerSessionId === brokerSessionId) {
+            onEvent(notification.params.entry);
           }
         };
 

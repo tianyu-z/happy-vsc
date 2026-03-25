@@ -69,6 +69,22 @@ async function createBrokerEventServer() {
         );
       }
     },
+    async closeActiveConnections() {
+      const closeWaiters = [...sockets].map(
+        (socket) =>
+          new Promise<void>((resolve) => {
+            if (socket.readyState === WebSocket.CLOSED) {
+              resolve();
+              return;
+            }
+
+            socket.once('close', () => resolve());
+            socket.close();
+          }),
+      );
+
+      await Promise.all(closeWaiters);
+    },
     async close() {
       for (const socket of wsServer.clients) {
         socket.close();
@@ -141,5 +157,61 @@ describe('BrokerEventStream', () => {
 
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
     expect(events).toHaveLength(1);
+  });
+
+  it('fails fast on malformed subscribe ack payload', async () => {
+    const httpServer = createServer();
+    const wsServer = new WebSocketServer({ server: httpServer });
+
+    wsServer.on('connection', (socket) => {
+      socket.on('message', (raw) => {
+        const request = JSON.parse(String(raw)) as RpcRequest;
+        if (request.method === 'subscribeEvents') {
+          socket.send(JSON.stringify({ id: request.id, result: { ok: true } }));
+        }
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once('error', reject);
+      httpServer.listen(0, '127.0.0.1', () => resolve());
+    });
+
+    const address = httpServer.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('failed to bind broker event test server');
+    }
+
+    const stream = new BrokerEventStream(`ws://127.0.0.1:${address.port}`, 5_000);
+    const startedAt = Date.now();
+
+    try {
+      await expect(stream.subscribeEvents('broker-sess-1', () => {})).rejects.toThrow();
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+    } finally {
+      await stream.close();
+      for (const socket of wsServer.clients) {
+        socket.close();
+      }
+      await new Promise<void>((resolve) => wsServer.close(() => resolve()));
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    }
+  });
+
+  it('allows re-subscribe after remote close', async () => {
+    const server = await createBrokerEventServer();
+    servers.push(server);
+
+    const stream = new BrokerEventStream(server.url);
+    await stream.subscribeEvents('broker-sess-1', () => {});
+
+    await server.closeActiveConnections();
+
+    await expect(stream.subscribeEvents('broker-sess-1', () => {})).resolves.toBeUndefined();
+    expect(
+      server.calls.filter((call) => call.method === 'subscribeEvents'),
+    ).toHaveLength(2);
+
+    await stream.close();
   });
 });
