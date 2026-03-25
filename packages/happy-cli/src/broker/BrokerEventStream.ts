@@ -20,6 +20,14 @@ type RpcError = {
 
 const DEFAULT_SUBSCRIBE_TIMEOUT_MS = 10_000;
 
+export type BrokerEventStreamDisconnectReason =
+  | { kind: 'close' }
+  | { kind: 'error'; error: Error };
+
+export type BrokerEventStreamSubscribeOptions = {
+  onDisconnect?: (reason: BrokerEventStreamDisconnectReason) => void;
+};
+
 export class BrokerEventStream {
   private socket: WebSocket | null = null;
   private messageListener: ((raw: WebSocket.RawData) => void) | null = null;
@@ -32,6 +40,7 @@ export class BrokerEventStream {
   async subscribeEvents(
     brokerSessionId: string,
     onEvent: (event: BrokerEventLogEntry) => void,
+    options: BrokerEventStreamSubscribeOptions = {},
   ): Promise<void> {
     if (this.socket) {
       throw new Error('Broker event stream already subscribed');
@@ -47,6 +56,15 @@ export class BrokerEventStream {
 
       this.detachSocketListeners(socket);
       this.socket = null;
+    };
+    let disconnectNotified = false;
+    const notifyDisconnect = (reason: BrokerEventStreamDisconnectReason) => {
+      if (disconnectNotified) {
+        return;
+      }
+
+      disconnectNotified = true;
+      options.onDisconnect?.(reason);
     };
 
     try {
@@ -70,8 +88,14 @@ export class BrokerEventStream {
 
           settled = true;
           cleanupSubscribeHandlers();
-          socket.on('close', clearSocketIfCurrent);
-          socket.on('error', clearSocketIfCurrent);
+          socket.on('close', () => {
+            notifyDisconnect({ kind: 'close' });
+            clearSocketIfCurrent();
+          });
+          socket.on('error', (error) => {
+            notifyDisconnect({ kind: 'error', error });
+            clearSocketIfCurrent();
+          });
           resolve();
         };
 

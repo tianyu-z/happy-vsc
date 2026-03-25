@@ -214,4 +214,59 @@ describe('BrokerEventStream', () => {
 
     await stream.close();
   });
+
+  it('notifies caller when remote close happens after subscribe', async () => {
+    const server = await createBrokerEventServer();
+    servers.push(server);
+
+    const stream = new BrokerEventStream(server.url);
+    const disconnects: unknown[] = [];
+
+    await stream.subscribeEvents(
+      'broker-sess-1',
+      () => {},
+      {
+        onDisconnect: (reason) => disconnects.push(reason),
+      },
+    );
+
+    await server.closeActiveConnections();
+
+    await expect
+      .poll(() => disconnects.length)
+      .toBe(1);
+    expect(disconnects[0]).toMatchObject({ kind: 'close' });
+
+    await stream.close();
+  });
+
+  it('notifies caller when socket errors after subscribe', async () => {
+    const server = await createBrokerEventServer();
+    servers.push(server);
+
+    const stream = new BrokerEventStream(server.url);
+    const disconnects: unknown[] = [];
+
+    await stream.subscribeEvents(
+      'broker-sess-1',
+      () => {},
+      {
+        onDisconnect: (reason) => disconnects.push(reason),
+      },
+    );
+
+    const socket = (stream as unknown as { socket: WebSocket | null }).socket;
+    if (!socket) {
+      throw new Error('expected stream socket');
+    }
+    socket.emit('error', new Error('simulated transport error'));
+
+    await expect
+      .poll(() => disconnects.length)
+      .toBe(1);
+    expect(disconnects[0]).toMatchObject({
+      kind: 'error',
+      error: expect.objectContaining({ message: 'simulated transport error' }),
+    });
+  });
 });
