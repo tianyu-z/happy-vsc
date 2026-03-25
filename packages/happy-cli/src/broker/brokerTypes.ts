@@ -85,3 +85,155 @@ export const brokerAttachmentRefSchema = z
   })
   .strict();
 export type BrokerAttachmentRef = z.infer<typeof brokerAttachmentRefSchema>;
+
+export const brokerEventRoleSchema = z.enum(['user', 'assistant', 'tool']);
+export type BrokerEventRole = z.infer<typeof brokerEventRoleSchema>;
+
+const brokerSnapshotEventSchema = z
+  .object({
+    type: z.literal('session.snapshot'),
+    snapshot: brokerSnapshotSchema,
+  })
+  .strict();
+
+const brokerDiscoveredSessionEventSchema = z
+  .object({
+    type: z.literal('session.discovered'),
+    session: brokerDiscoveredSessionSchema,
+  })
+  .strict();
+
+const brokerMessageDeltaEventSchema = z
+  .object({
+    type: z.literal('session.message.delta'),
+    brokerSessionId: z.string().min(1),
+    payload: z
+      .object({
+        role: brokerEventRoleSchema,
+        text: z.string(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const brokerRunStatusEventSchema = z
+  .object({
+    type: z.literal('session.run.status'),
+    brokerSessionId: z.string().min(1),
+    payload: z
+      .object({
+        status: z.enum([
+          'idle',
+          'running',
+          'waiting_approval',
+          'interrupted',
+          'completed',
+          'failed',
+        ]),
+        reason: z.string().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const brokerApprovalDecisionSchema = z.enum(['approve', 'deny']);
+
+const brokerApprovalRequestedEventSchema = z
+  .object({
+    type: z.literal('session.approval.requested'),
+    brokerSessionId: z.string().min(1),
+    payload: z
+      .object({
+        approvalId: z.string().min(1),
+        label: z.string(),
+        description: z.string().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const brokerApprovalResolvedEventSchema = z
+  .object({
+    type: z.literal('session.approval.resolved'),
+    brokerSessionId: z.string().min(1),
+    payload: z
+      .object({
+        approvalId: z.string().min(1),
+        decision: brokerApprovalDecisionSchema,
+      })
+      .strict(),
+  })
+  .strict();
+
+const brokerApprovalDismissedEventSchema = z
+  .object({
+    type: z.literal('session.approval.dismissed'),
+    brokerSessionId: z.string().min(1),
+    payload: z
+      .object({
+        approvalId: z.string().min(1),
+      })
+      .strict(),
+  })
+  .strict();
+
+const brokerInterruptEventSchema = z
+  .object({
+    type: z.literal('session.interrupt'),
+    brokerSessionId: z.string().min(1),
+    payload: z
+      .object({
+        outcome: z.enum(['requested', 'accepted', 'rejected', 'completed']),
+        reason: z.string().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const brokerAttachmentAddedEventSchema = z
+  .object({
+    type: z.literal('session.attachment.added'),
+    brokerSessionId: z.string().min(1),
+    payload: z
+      .object({
+        attachment: brokerAttachmentRefSchema,
+      })
+      .strict(),
+  })
+  .strict();
+
+export const brokerEventSchema = z.discriminatedUnion('type', [
+  brokerSnapshotEventSchema,
+  brokerDiscoveredSessionEventSchema,
+  brokerMessageDeltaEventSchema,
+  brokerRunStatusEventSchema,
+  brokerApprovalRequestedEventSchema,
+  brokerApprovalResolvedEventSchema,
+  brokerApprovalDismissedEventSchema,
+  brokerInterruptEventSchema,
+  brokerAttachmentAddedEventSchema,
+]);
+export type BrokerEvent = z.infer<typeof brokerEventSchema>;
+
+export const brokerEventLogEntrySchema = z
+  .object({
+    seq: z.number().int().nonnegative(),
+    at: z.number().int().nonnegative(),
+    sessionId: z.string().min(1),
+    event: brokerEventSchema,
+  })
+  .strict();
+export type BrokerEventLogEntry = z.infer<typeof brokerEventLogEntrySchema>;
+
+export const brokerEventNotificationSchema = z
+  .object({
+    method: z.literal('brokerEvent'),
+    params: z
+      .object({
+        brokerSessionId: z.string().min(1),
+        entry: brokerEventLogEntrySchema,
+      })
+      .strict(),
+  })
+  .strict();
+export type BrokerEventNotification = z.infer<typeof brokerEventNotificationSchema>;

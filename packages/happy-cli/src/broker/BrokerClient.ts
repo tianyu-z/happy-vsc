@@ -47,6 +47,24 @@ export class BrokerClient {
     return z.boolean().parse(result);
   }
 
+  async interruptSession(brokerSessionId: string, reason: string): Promise<boolean> {
+    const result = await this.request('interruptSession', { brokerSessionId, reason });
+    return z.boolean().parse(result);
+  }
+
+  async resolveApproval(
+    brokerSessionId: string,
+    approvalId: string,
+    decision: 'approve' | 'deny',
+  ): Promise<boolean> {
+    const result = await this.request('resolveApproval', {
+      brokerSessionId,
+      approvalId,
+      decision,
+    });
+    return z.boolean().parse(result);
+  }
+
   async listAttachments(brokerSessionId: string): Promise<BrokerAttachmentRef[]> {
     const result = await this.request('listAttachments', { brokerSessionId });
     return brokerAttachmentRefSchema.array().parse(result);

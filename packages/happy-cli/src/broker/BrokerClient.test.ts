@@ -330,4 +330,47 @@ describe('BrokerClient', () => {
       await server.close();
     }
   });
+
+  it('sends interruptSession with brokerSessionId and reason', async () => {
+    const server = await createBrokerRpcServer({
+      interruptSession: () => true,
+    });
+
+    try {
+      const client = new BrokerClient(server.url);
+      await expect(
+        client.interruptSession('broker-sess-1', 'user_abort'),
+      ).resolves.toBe(true);
+
+      expect(server.calls).toContainEqual(
+        expect.objectContaining({
+          method: 'interruptSession',
+          params: {
+            brokerSessionId: 'broker-sess-1',
+            reason: 'user_abort',
+          },
+        }),
+      );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('sends resolveApproval with approve/deny decisions', async () => {
+    const server = await createBrokerRpcServer({
+      resolveApproval: () => true,
+    });
+
+    try {
+      const client = new BrokerClient(server.url);
+      await expect(
+        client.resolveApproval('broker-sess-1', 'approval-1', 'approve'),
+      ).resolves.toBe(true);
+      await expect(
+        client.resolveApproval('broker-sess-1', 'approval-2', 'deny'),
+      ).resolves.toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
 });
