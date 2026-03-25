@@ -3,11 +3,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { createSessionMetadata } from '../utils/createSessionMetadata';
 import { runBrokerAttachedSession } from './runBrokerAttachedSession';
 
-const { mockApiClientCreate, mockNotifyDaemonSessionStarted, mockReadSettings } = vi.hoisted(
+const {
+  mockApiClientCreate,
+  mockBrokerRelayRunner,
+  mockBrokerRelayRunnerStart,
+  mockLoadBrokerManifest,
+  mockNotifyDaemonSessionStarted,
+  mockReadSettings,
+  mockSetupOfflineReconnection,
+} = vi.hoisted(
   () => ({
     mockApiClientCreate: vi.fn(),
+    mockBrokerRelayRunner: vi.fn(),
+    mockBrokerRelayRunnerStart: vi.fn(),
+    mockLoadBrokerManifest: vi.fn(),
     mockNotifyDaemonSessionStarted: vi.fn(),
     mockReadSettings: vi.fn(),
+    mockSetupOfflineReconnection: vi.fn(),
   }),
 );
 
@@ -19,6 +31,20 @@ vi.mock('../api/api', () => ({
 
 vi.mock('../daemon/controlClient', () => ({
   notifyDaemonSessionStarted: mockNotifyDaemonSessionStarted,
+}));
+
+vi.mock('../utils/setupOfflineReconnection', () => ({
+  setupOfflineReconnection: mockSetupOfflineReconnection,
+}));
+
+vi.mock('./BrokerRelayRunner', () => ({
+  BrokerRelayRunner: mockBrokerRelayRunner.mockImplementation(() => ({
+    start: mockBrokerRelayRunnerStart,
+  })),
+}));
+
+vi.mock('./brokerManifest', () => ({
+  loadBrokerManifest: mockLoadBrokerManifest,
 }));
 
 vi.mock('../daemon/run', () => ({
@@ -81,27 +107,9 @@ describe('createSessionMetadata broker projection', () => {
 });
 
 describe('runBrokerAttachedSession', () => {
-  it('calls broker attach and starts a happy session with broker metadata', async () => {
+  it('delegates broker-attached sessions to the long-lived relay runner', async () => {
     const discoverSessions = vi.fn();
-    const attachSession = vi.fn().mockResolvedValue({
-      brokerSessionId: 'broker-sess-1',
-      provider: 'claude',
-      latestSeq: 5,
-      capabilities: ['sendUserMessage', 'interrupt'],
-      degradedFlags: ['missing_editor_context'],
-      desiredMode: 'runtime_preferred',
-      effectiveMode: 'runtime',
-      modeReason: 'runtime_ready',
-      compatibility: 'supported',
-      providerExtension: {
-        id: 'anthropic.claude-code',
-        version: '1.0.0',
-      },
-      probeHealth: {
-        runtime: 'ready',
-        storage: 'ready',
-      },
-    });
+    const attachSession = vi.fn();
 
     const getOrCreateMachine = vi.fn().mockResolvedValue({});
     const getOrCreateSession = vi.fn().mockResolvedValue({
@@ -116,6 +124,7 @@ describe('runBrokerAttachedSession', () => {
 
     await runBrokerAttachedSession({
       api: api as any,
+      brokerUrl: 'ws://broker.test',
       machineId: 'machine-1',
       startedBy: 'terminal',
       brokerSessionId: 'broker-sess-1',
@@ -124,27 +133,55 @@ describe('runBrokerAttachedSession', () => {
     });
 
     expect(discoverSessions).not.toHaveBeenCalled();
-    expect(attachSession).toHaveBeenCalledWith('broker-sess-1');
-    expect(getOrCreateMachine).toHaveBeenCalledTimes(1);
-    expect(getOrCreateSession).toHaveBeenCalledWith(
+    expect(attachSession).not.toHaveBeenCalled();
+    expect(getOrCreateMachine).not.toHaveBeenCalled();
+    expect(getOrCreateSession).not.toHaveBeenCalled();
+    expect(mockBrokerRelayRunner).toHaveBeenCalledWith(
       expect.objectContaining({
-        tag: 'broker:machine-1:broker-sess-1',
-        metadata: expect.objectContaining({
-          sessionSource: 'broker_attached',
-          brokerSessionId: 'broker-sess-1',
-          brokerCapabilities: ['sendUserMessage', 'interrupt'],
-          brokerDegradedFlags: ['missing_editor_context'],
-          brokerDesiredMode: 'runtime_preferred',
-          brokerEffectiveMode: 'runtime',
-          brokerModeReason: 'runtime_ready',
-          brokerCompatibility: 'supported',
-        }),
+        api,
+        brokerClient: { discoverSessions, attachSession },
+        brokerSessionId: 'broker-sess-1',
+        brokerUrl: 'ws://broker.test',
+        machineId: 'machine-1',
+        notifyDaemonSessionStarted,
+        startedBy: 'terminal',
       }),
     );
-    expect(notifyDaemonSessionStarted).toHaveBeenCalledWith(
-      'happy-session-1',
+    expect(mockBrokerRelayRunnerStart).toHaveBeenCalledTimes(1);
+    expect(notifyDaemonSessionStarted).not.toHaveBeenCalled();
+  });
+
+  it('resolves brokerUrl from the manifest when the wrapper delegates to the runner', async () => {
+    const brokerClient = {
+      attachSession: vi.fn(),
+      interruptSession: vi.fn(),
+      resolveApproval: vi.fn(),
+      sendMessage: vi.fn(),
+    };
+    const api = {
+      getOrCreateMachine: vi.fn(),
+      getOrCreateSession: vi.fn(),
+      sessionSyncClient: vi.fn(),
+    };
+
+    mockLoadBrokerManifest.mockResolvedValueOnce({
+      url: 'ws://broker.from.manifest',
+    });
+
+    await runBrokerAttachedSession({
+      api: api as any,
+      brokerClient: brokerClient as any,
+      brokerRootDir: '/tmp/workspace',
+      brokerSessionId: 'broker-sess-1',
+      machineId: 'machine-1',
+    });
+
+    expect(mockLoadBrokerManifest).toHaveBeenCalledWith('/tmp/workspace');
+    expect(mockBrokerRelayRunner).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionSource: 'broker_attached',
+        brokerClient,
+        brokerSessionId: 'broker-sess-1',
+        brokerUrl: 'ws://broker.from.manifest',
       }),
     );
   });

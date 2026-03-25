@@ -4,19 +4,24 @@ import { notifyDaemonSessionStarted } from '../daemon/controlClient';
 import { initialMachineMetadata } from '../daemon/run';
 import type { Credentials } from '../persistence';
 import { readSettings } from '../persistence';
-import { createSessionMetadata } from '../utils/createSessionMetadata';
+import { setupOfflineReconnection } from '../utils/setupOfflineReconnection';
 
 import { BrokerClient } from './BrokerClient';
-import { buildBrokerSessionTag } from './BrokerSessionIdentity';
+import type { BrokerEventStream } from './BrokerEventStream';
+import { BrokerRelayRunner, type BrokerRelayRunnerOptions } from './BrokerRelayRunner';
 import { loadBrokerManifest } from './brokerManifest';
 
-type BrokerAttachClient = Pick<BrokerClient, 'attachSession'>;
-type BrokerAttachApi = Pick<ApiClient, 'getOrCreateMachine' | 'getOrCreateSession'>;
+type BrokerAttachClient = Pick<
+  BrokerClient,
+  'attachSession' | 'interruptSession' | 'resolveApproval' | 'sendMessage'
+>;
+type BrokerAttachApi = Pick<ApiClient, 'getOrCreateMachine' | 'getOrCreateSession' | 'sessionSyncClient'>;
 
 export type RunBrokerAttachedSessionOptions = {
   credentials?: Credentials;
   api?: BrokerAttachApi;
   brokerClient?: BrokerAttachClient;
+  brokerEventStream?: Pick<BrokerEventStream, 'close' | 'subscribeEvents'>;
   brokerRootDir?: string;
   brokerUrl?: string;
   brokerSessionId: string;
@@ -30,48 +35,28 @@ export async function runBrokerAttachedSession(options: RunBrokerAttachedSession
   const api = await resolveApi(options);
   const machineId = await resolveMachineId(options.machineId);
   const brokerClient = await resolveBrokerClient(options);
-  const notify = options.notifyDaemonSessionStarted ?? notifyDaemonSessionStarted;
-
-  await api.getOrCreateMachine({
+  const brokerUrl = await resolveBrokerUrl(options);
+  const setupReconnect: BrokerRelayRunnerOptions['setupOfflineReconnection'] = (runnerOptions) =>
+    setupOfflineReconnection({
+      ...runnerOptions,
+      api: runnerOptions.api as ApiClient,
+    });
+  const runner = new BrokerRelayRunner({
+    api,
+    brokerClient,
+    brokerEventStream: options.brokerEventStream,
+    brokerSessionId: options.brokerSessionId,
+    brokerUrl,
+    machineMetadata: initialMachineMetadata,
     machineId,
-    metadata: initialMachineMetadata,
-  });
-
-  const snapshot = await brokerClient.attachSession(options.brokerSessionId);
-  if (!snapshot) {
-    throw new Error(`Broker session not found: ${options.brokerSessionId}`);
-  }
-
-  const { state, metadata } = createSessionMetadata({
-    flavor: snapshot.provider,
-    machineId,
+    notifyDaemonSessionStarted:
+      options.notifyDaemonSessionStarted ?? notifyDaemonSessionStarted,
+    sessionTag: options.sessionTag,
+    setupOfflineReconnection: setupReconnect,
     startedBy: options.startedBy,
-    source: 'broker_attached',
-    brokerSessionId: snapshot.brokerSessionId,
-    brokerCapabilities: snapshot.capabilities,
-    brokerDegradedFlags: snapshot.degradedFlags,
-    brokerDesiredMode: snapshot.desiredMode,
-    brokerEffectiveMode: snapshot.effectiveMode,
-    brokerModeReason: snapshot.modeReason,
-    brokerCompatibility: snapshot.compatibility,
-    brokerProviderExtension: snapshot.providerExtension,
-    brokerProbeHealth: snapshot.probeHealth,
   });
 
-  const response = await api.getOrCreateSession({
-    tag:
-      options.sessionTag ??
-      buildBrokerSessionTag({
-        machineId,
-        brokerSessionId: snapshot.brokerSessionId,
-      }),
-    metadata,
-    state,
-  });
-
-  if (response) {
-    await notify(response.id, metadata);
-  }
+  await runner.start();
 }
 
 async function resolveApi(options: RunBrokerAttachedSessionOptions): Promise<BrokerAttachApi> {
@@ -106,4 +91,17 @@ async function resolveBrokerClient(options: RunBrokerAttachedSessionOptions): Pr
 
   const manifest = await loadBrokerManifest(options.brokerRootDir ?? process.cwd());
   return new BrokerClient(manifest.url);
+}
+
+async function resolveBrokerUrl(options: RunBrokerAttachedSessionOptions): Promise<string | undefined> {
+  if (options.brokerUrl) {
+    return options.brokerUrl;
+  }
+
+  if (options.brokerEventStream) {
+    return undefined;
+  }
+
+  const manifest = await loadBrokerManifest(options.brokerRootDir ?? process.cwd());
+  return manifest.url;
 }
