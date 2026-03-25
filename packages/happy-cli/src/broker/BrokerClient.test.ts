@@ -369,6 +369,27 @@ describe('BrokerClient', () => {
       await expect(
         client.resolveApproval('broker-sess-1', 'approval-2', 'deny'),
       ).resolves.toBe(true);
+
+      expect(server.calls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            method: 'resolveApproval',
+            params: {
+              brokerSessionId: 'broker-sess-1',
+              approvalId: 'approval-1',
+              decision: 'approve',
+            },
+          }),
+          expect.objectContaining({
+            method: 'resolveApproval',
+            params: {
+              brokerSessionId: 'broker-sess-1',
+              approvalId: 'approval-2',
+              decision: 'deny',
+            },
+          }),
+        ]),
+      );
     } finally {
       await server.close();
     }
