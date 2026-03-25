@@ -128,6 +128,7 @@ describe('runBrokerAttachedSession', () => {
     expect(getOrCreateMachine).toHaveBeenCalledTimes(1);
     expect(getOrCreateSession).toHaveBeenCalledWith(
       expect.objectContaining({
+        tag: 'broker:machine-1:broker-sess-1',
         metadata: expect.objectContaining({
           sessionSource: 'broker_attached',
           brokerSessionId: 'broker-sess-1',

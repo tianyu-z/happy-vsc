@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import { ApiClient } from '../api/api';
 import type { Metadata } from '../api/types';
 import { notifyDaemonSessionStarted } from '../daemon/controlClient';
@@ -9,6 +7,7 @@ import { readSettings } from '../persistence';
 import { createSessionMetadata } from '../utils/createSessionMetadata';
 
 import { BrokerClient } from './BrokerClient';
+import { buildBrokerSessionTag } from './BrokerSessionIdentity';
 import { loadBrokerManifest } from './brokerManifest';
 
 type BrokerAttachClient = Pick<BrokerClient, 'attachSession'>;
@@ -60,7 +59,12 @@ export async function runBrokerAttachedSession(options: RunBrokerAttachedSession
   });
 
   const response = await api.getOrCreateSession({
-    tag: options.sessionTag ?? randomUUID(),
+    tag:
+      options.sessionTag ??
+      buildBrokerSessionTag({
+        machineId,
+        brokerSessionId: snapshot.brokerSessionId,
+      }),
     metadata,
     state,
   });
