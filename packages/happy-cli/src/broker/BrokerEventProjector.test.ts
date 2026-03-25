@@ -146,6 +146,42 @@ describe('BrokerEventProjector', () => {
     });
   });
 
+  it('dedupes duplicate approval requests already pending in state', () => {
+    const initialRequest = {
+      tool: 'Write',
+      arguments: { description: 'Apply patch', brokerApprovalId: 'approval-4' },
+      createdAt: 111,
+    };
+    let state: any = {
+      requests: {
+        'approval-4': { ...initialRequest },
+      },
+      completedRequests: {},
+    };
+    const updateAgentState = vi.fn((handler: (currentState: any) => any) => {
+      state = handler(state);
+    });
+
+    const projector = new BrokerEventProjector({
+      sendAgentMessage: vi.fn(),
+      keepAlive: vi.fn(),
+      updateAgentState,
+    });
+
+    projector.applyEvent({
+      type: 'session.approval.requested',
+      brokerSessionId: 'broker-sess-1',
+      payload: {
+        approvalId: 'approval-4',
+        label: 'Write',
+        description: 'Apply patch',
+      },
+    });
+
+    expect(state.requests?.['approval-4']).toEqual(initialRequest);
+    expect(state.completedRequests?.['approval-4']).toBeUndefined();
+  });
+
   it('dedupes repeated run statuses', () => {
     const keepAlive = vi.fn();
     const projector = new BrokerEventProjector({

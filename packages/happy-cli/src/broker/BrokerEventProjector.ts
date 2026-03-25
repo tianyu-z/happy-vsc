@@ -104,20 +104,25 @@ export class BrokerEventProjector {
     this.pendingApprovals.add(payload.approvalId);
     const now = Date.now();
 
-    this.session.updateAgentState((currentState) => ({
-      ...currentState,
-      requests: {
-        ...currentState.requests,
-        [payload.approvalId]: {
-          tool: payload.label,
-          arguments: {
-            description: payload.description ?? null,
-            brokerApprovalId: payload.approvalId,
+    this.session.updateAgentState((currentState) => {
+      if (currentState.requests?.[payload.approvalId]) {
+        return currentState;
+      }
+      return {
+        ...currentState,
+        requests: {
+          ...currentState.requests,
+          [payload.approvalId]: {
+            tool: payload.label,
+            arguments: {
+              description: payload.description ?? null,
+              brokerApprovalId: payload.approvalId,
+            },
+            createdAt: now,
           },
-          createdAt: now,
         },
-      },
-    }));
+      };
+    });
   }
 
   private handleApprovalResolved(payload: {
