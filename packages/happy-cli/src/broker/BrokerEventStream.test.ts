@@ -269,4 +269,30 @@ describe('BrokerEventStream', () => {
       error: expect.objectContaining({ message: 'simulated transport error' }),
     });
   });
+
+  it('still clears socket state when onDisconnect throws', async () => {
+    const server = await createBrokerEventServer();
+    servers.push(server);
+
+    const stream = new BrokerEventStream(server.url);
+
+    await stream.subscribeEvents(
+      'broker-sess-1',
+      () => {},
+      {
+        onDisconnect: () => {
+          throw new Error('disconnect handler failed');
+        },
+      },
+    );
+
+    await server.closeActiveConnections();
+
+    await expect(stream.subscribeEvents('broker-sess-1', () => {})).resolves.toBeUndefined();
+    expect(
+      server.calls.filter((call) => call.method === 'subscribeEvents'),
+    ).toHaveLength(2);
+
+    await stream.close();
+  });
 });

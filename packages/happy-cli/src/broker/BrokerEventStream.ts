@@ -64,7 +64,11 @@ export class BrokerEventStream {
       }
 
       disconnectNotified = true;
-      options.onDisconnect?.(reason);
+      try {
+        options.onDisconnect?.(reason);
+      } catch {
+        // Keep transport cleanup resilient even if consumer callback fails.
+      }
     };
 
     try {
@@ -89,12 +93,18 @@ export class BrokerEventStream {
           settled = true;
           cleanupSubscribeHandlers();
           socket.on('close', () => {
-            notifyDisconnect({ kind: 'close' });
-            clearSocketIfCurrent();
+            try {
+              notifyDisconnect({ kind: 'close' });
+            } finally {
+              clearSocketIfCurrent();
+            }
           });
           socket.on('error', (error) => {
-            notifyDisconnect({ kind: 'error', error });
-            clearSocketIfCurrent();
+            try {
+              notifyDisconnect({ kind: 'error', error });
+            } finally {
+              clearSocketIfCurrent();
+            }
           });
           resolve();
         };
