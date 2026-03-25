@@ -52,6 +52,13 @@ export class UnifiedSessionRuntimeStore {
     return record ? cloneRecord(record) : undefined;
   }
 
+  getRecordByProviderSessionKey(
+    providerSessionKey: string,
+  ): UnifiedSessionRecord | undefined {
+    const record = this.byProviderSessionKey.get(providerSessionKey);
+    return record ? cloneRecord(record) : undefined;
+  }
+
   getSnapshot(brokerSessionId: string): BridgeBrokerSnapshot | undefined {
     const record = this.byBrokerSessionId.get(brokerSessionId);
     return record ? this.toSnapshot(record) : undefined;

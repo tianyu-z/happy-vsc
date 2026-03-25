@@ -8,7 +8,8 @@
       "runtimeExecutable": "${execPath}",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}/packages/happy-vscode-bridge",
-        "--disable-extensions"
+        "--disable-extension=happy.happy-vscode-bridge",
+        "--disable-extension=undefined_publisher.happy-vscode-bridge"
       ],
       "preLaunchTask": "happy-vscode-bridge: prelaunch",
       "outFiles": ["${workspaceFolder}/packages/happy-vscode-bridge/dist/**/*.cjs"]

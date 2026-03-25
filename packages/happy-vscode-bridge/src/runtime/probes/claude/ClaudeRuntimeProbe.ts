@@ -1,7 +1,11 @@
 import type { BrokerAttachability } from 'happy-wire';
 
 import type { BrokerEditorContext, ProviderEvent } from '../../../providers/types';
-import type { RuntimeSessionEvidence, WorkspaceLocator } from '../../types';
+import type {
+  RuntimeSessionBridgeDiagnostic,
+  RuntimeSessionEvidence,
+  WorkspaceLocator,
+} from '../../types';
 import type { ProviderHostResolution, RuntimeProbe } from '../types';
 import { claudeProbeFixtures } from './claudeProbeFixtures';
 
@@ -14,9 +18,11 @@ type ClaudeRuntimeProbeSession = {
   conversationId?: string;
   transcriptObjectIds?: string[];
   supportsInterrupt?: boolean;
+  interruptBridgeAvailable?: boolean;
   supportsApprovals?: boolean;
   canAttach?: boolean;
   eventStreamAvailable?: boolean;
+  bridgeDiagnostics?: RuntimeSessionBridgeDiagnostic;
   workspace: WorkspaceLocator;
 };
 
@@ -84,7 +90,10 @@ export class ClaudeRuntimeProbe implements RuntimeProbe {
         degradedFlags.push('read_only_attach');
       }
 
-      if (session.supportsInterrupt && this.options.interrupt) {
+      const interruptBridgeAvailable =
+        (session.interruptBridgeAvailable ?? Boolean(this.options.interrupt)) &&
+        Boolean(this.options.interrupt);
+      if (session.supportsInterrupt && interruptBridgeAvailable) {
         capabilities.push('interrupt');
       } else if (session.supportsInterrupt) {
         degradedFlags.push('interrupt_bridge_unavailable');
@@ -115,6 +124,7 @@ export class ClaudeRuntimeProbe implements RuntimeProbe {
         workspace: session.workspace,
         capabilities: unique(capabilities),
         degradedFlags: unique(degradedFlags),
+        bridgeDiagnostics: session.bridgeDiagnostics,
         attachability: resolveAttachability(
           session.canAttach === false
             ? 'not_attachable'

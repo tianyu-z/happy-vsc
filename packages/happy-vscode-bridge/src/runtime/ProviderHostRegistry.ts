@@ -1,3 +1,6 @@
+import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
+
 import type { BrokerProvider } from 'happy-wire';
 
 import { claudeProbeFixtures } from './probes/claude/claudeProbeFixtures';
@@ -12,7 +15,9 @@ export type ProviderRegistryExtension = {
   isActive: boolean;
   packageJSON?: {
     version?: string;
+    main?: string;
   };
+  extensionPath?: string;
   exports?: unknown;
   activate(): Promise<unknown>;
 };
@@ -42,16 +47,40 @@ const providerExtensionIds: Record<BrokerProvider, string> = {
   claude: claudeProbeFixtures.reconBaseline.extensionId,
   codex: codexProbeFixtures.reconBaseline.extensionId,
 };
+const registryRequire = createRequire(
+  resolve(process.cwd(), '__happy_vscode_bridge_registry__.cjs'),
+);
+
+function normalizeExtensionId(extensionId: string): string {
+  return extensionId.trim().toLowerCase();
+}
 
 function getExtension(
   extensions: ExtensionLookup,
   extensionId: string,
 ): ProviderRegistryExtension | undefined {
   if (Array.isArray(extensions)) {
-    return extensions.find((extension) => extension.id === extensionId);
+    const expectedId = normalizeExtensionId(extensionId);
+    return extensions.find(
+      (extension) => normalizeExtensionId(extension.id) === expectedId,
+    );
   }
 
-  return extensions.get(extensionId);
+  const direct = extensions.get(extensionId);
+  if (direct) {
+    return direct;
+  }
+
+  if (extensions instanceof Map) {
+    const expectedId = normalizeExtensionId(extensionId);
+    for (const extension of extensions.values()) {
+      if (normalizeExtensionId(extension.id) === expectedId) {
+        return extension;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 function getVersion(extension: ProviderRegistryExtension | undefined): string {
@@ -64,6 +93,36 @@ function getExportKeys(exportsValue: unknown): string[] {
   }
 
   return Object.keys(exportsValue as Record<string, unknown>).sort();
+}
+
+function getModuleExportKeys(extension: ProviderRegistryExtension): string[] {
+  const extensionPath = extension.extensionPath;
+  const main = extension.packageJSON?.main;
+  if (!extensionPath || !main) {
+    return [];
+  }
+
+  const candidatePath = resolve(extensionPath, main);
+  let resolvedPath = candidatePath;
+  try {
+    resolvedPath = registryRequire.resolve(candidatePath);
+  } catch {
+    resolvedPath = candidatePath;
+  }
+
+  const exportsValue = registryRequire.cache[resolvedPath]?.exports;
+  if (
+    (!exportsValue || (typeof exportsValue !== 'object' && typeof exportsValue !== 'function'))
+  ) {
+    return [];
+  }
+
+  return Object.getOwnPropertyNames(exportsValue)
+    .filter(
+      (key) =>
+        !['__esModule', 'default', 'length', 'name', 'prototype'].includes(key),
+    )
+    .sort();
 }
 
 async function listCommands(host: ProviderRegistryVscodeHost): Promise<string[]> {
@@ -173,6 +232,7 @@ export class ProviderHostRegistry {
         commands: [],
         contextKeys: [],
         exportKeys: [],
+        moduleExportKeys: [],
         host: null,
       };
     }
@@ -199,6 +259,7 @@ export class ProviderHostRegistry {
         commands,
         contextKeys,
         exportKeys: getExportKeys(exportsValue),
+        moduleExportKeys: getModuleExportKeys(extension),
         host: probeHost,
       };
     } catch {
@@ -213,6 +274,7 @@ export class ProviderHostRegistry {
         commands,
         contextKeys,
         exportKeys: [],
+        moduleExportKeys: getModuleExportKeys(extension),
         host: null,
       };
     }

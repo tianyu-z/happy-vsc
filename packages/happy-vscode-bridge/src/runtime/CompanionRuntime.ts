@@ -13,10 +13,12 @@ import { ProviderSessionNormalizer } from './ProviderSessionNormalizer';
 import { SessionModeResolver } from './SessionModeResolver';
 import { UnifiedSessionRuntimeStore } from './UnifiedSessionRuntimeStore';
 import type {
+  BridgeProviderDiagnostic,
   BridgeBrokerDiscoveredSession,
   BridgeBrokerSnapshot,
   DesiredMode,
   NormalizedProviderSession,
+  ProviderRuntimeCaptureDiagnostic,
   RuntimeSessionEvidence,
   StorageSessionEvidence,
 } from './types';
@@ -30,6 +32,9 @@ export type CompanionProviderState = {
   resolution: ProviderHostResolution;
   runtimeProbe?: RuntimeProbe;
   storageProbe?: StorageProbe;
+  probeDiagnostics?: {
+    runtimeCapture?: ProviderRuntimeCaptureDiagnostic | null;
+  };
 };
 
 export type CompanionProviderStateMap = Partial<
@@ -39,8 +44,16 @@ export type CompanionProviderStateMap = Partial<
 export type ProviderProbeFactory = (
   resolution: ProviderHostResolution,
 ) =>
-  | Promise<Pick<CompanionProviderState, 'runtimeProbe' | 'storageProbe'>>
-  | Pick<CompanionProviderState, 'runtimeProbe' | 'storageProbe'>;
+  | Promise<
+      Pick<
+        CompanionProviderState,
+        'runtimeProbe' | 'storageProbe' | 'probeDiagnostics'
+      >
+    >
+  | Pick<
+      CompanionProviderState,
+      'runtimeProbe' | 'storageProbe' | 'probeDiagnostics'
+    >;
 
 type CompanionRuntimeOptions = {
   providerStates?: CompanionProviderStateMap;
@@ -182,6 +195,7 @@ function toProviderStateMap(
 export interface CompanionRuntimeLike {
   refresh(): Promise<BridgeBrokerDiscoveredSession[]>;
   listDiscoveredSessions(): BridgeBrokerDiscoveredSession[];
+  listProviderDiagnostics(): BridgeProviderDiagnostic[];
   attachSession(brokerSessionId: string): Promise<BridgeBrokerSnapshot | null>;
   sendMessage(brokerSessionId: string, text: string): Promise<void>;
   interruptSession(brokerSessionId: string, reason: string): Promise<void>;
@@ -276,6 +290,61 @@ export class CompanionRuntime implements CompanionRuntimeLike {
 
   listDiscoveredSessions(): BridgeBrokerDiscoveredSession[] {
     return this.store.listDiscoveredSessions();
+  }
+
+  listProviderDiagnostics(): BridgeProviderDiagnostic[] {
+    const sessionsByProvider = new Map<
+      BrokerProvider,
+      BridgeProviderDiagnostic['discoveredSessions']
+    >();
+
+    for (const provider of supportedProviders) {
+      sessionsByProvider.set(provider, []);
+    }
+
+    for (const [providerSessionKey, sourceRecord] of this.sessionSources.entries()) {
+      const session = this.store.getRecordByProviderSessionKey(providerSessionKey);
+      if (!session) {
+        continue;
+      }
+
+      const sessions = sessionsByProvider.get(sourceRecord.provider) ?? [];
+      sessions.push({
+        title: session.title,
+        attachability: session.attachability,
+        capabilities: [...session.capabilities],
+        degradedFlags: [...session.degradedFlags],
+        desiredMode: session.desiredMode,
+        effectiveMode: session.effectiveMode,
+        modeReason: session.modeReason,
+        probeHealth: session.probeHealth,
+        runtimeDiagnostics: sourceRecord.runtime?.bridgeDiagnostics ?? null,
+      });
+      sessionsByProvider.set(sourceRecord.provider, sessions);
+    }
+
+    return supportedProviders.map((provider) => {
+      const state = this.providerStates[provider];
+      const resolution = state?.resolution;
+
+      return {
+        provider,
+        compatibility: resolution?.compatibility ?? 'incompatible',
+        activationState: resolution?.activationState ?? 'missing',
+        providerExtension: resolution?.providerExtension ?? {
+          id: 'unknown',
+          version: 'unknown',
+        },
+        commands: [...(resolution?.commands ?? [])],
+        contextKeys: [...(resolution?.contextKeys ?? [])],
+        exportKeys: [...(resolution?.exportKeys ?? [])],
+        moduleExportKeys: [...(resolution?.moduleExportKeys ?? [])],
+        runtimeCapture: state?.probeDiagnostics?.runtimeCapture ?? null,
+        hasRuntimeProbe: Boolean(state?.runtimeProbe),
+        hasStorageProbe: Boolean(state?.storageProbe),
+        discoveredSessions: [...(sessionsByProvider.get(provider) ?? [])],
+      };
+    });
   }
 
   async attachSession(brokerSessionId: string): Promise<BridgeBrokerSnapshot | null> {

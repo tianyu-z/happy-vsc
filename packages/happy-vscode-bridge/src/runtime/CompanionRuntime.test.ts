@@ -164,6 +164,113 @@ describe('CompanionRuntime', () => {
     expect(switched.degradedFlags).toContain('read_only_attach');
   });
 
+  it('surfaces session capabilities and degraded flags in provider diagnostics', async () => {
+    const runtime = new CompanionRuntime({
+      providerStates: {
+        claude: {
+          resolution: makeHostResolution(),
+          runtimeProbe: makeRuntimeProbe(),
+          storageProbe: makeStorageProbe(),
+        },
+      },
+    });
+
+    await runtime.refresh();
+
+    expect(runtime.listProviderDiagnostics()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: 'claude',
+          discoveredSessions: [
+            expect.objectContaining({
+              title: 'Runtime Title',
+              capabilities: expect.arrayContaining([
+                'sendUserMessage',
+                'interrupt',
+                'resolveApproval',
+              ]),
+              degradedFlags: expect.arrayContaining([
+                'runtime_probe_unverified',
+              ]),
+              probeHealth: {
+                runtime: 'degraded',
+                storage: 'ready',
+              },
+            }),
+          ],
+        }),
+      ]),
+    );
+  });
+
+  it('surfaces runtime capture and bridge diagnostics in provider diagnostics', async () => {
+    const runtime = new CompanionRuntime({
+      providerStates: {
+        claude: {
+          resolution: makeHostResolution(),
+          probeDiagnostics: {
+            runtimeCapture: {
+              captured: true,
+              patchedHostCount: 2,
+              providerKeys: ['allComms'],
+              providerMethods: ['resolveWebviewView'],
+              commCount: 1,
+              knownChannelRefs: ['live-channel-42'],
+            },
+          },
+          runtimeProbe: {
+            ...makeRuntimeProbe(),
+            discoverSessions: async () => [
+              {
+                providerSessionRef: 'runtime-ref-1',
+                conversationId: 'conv-1',
+                title: 'Runtime Title',
+                latestSeq: 2,
+                workspace: {
+                  folderUris: ['file:///workspace'],
+                },
+                capabilities: ['sendUserMessage'],
+                degradedFlags: ['runtime_probe_unverified'],
+                attachability: 'attachable_with_degraded_capabilities',
+                bridgeDiagnostics: {
+                  runtimeProviderSessionRef: 'runtime-ref-1',
+                  runtimeChannelRef: 'live-channel-42',
+                  interruptBridgeState: 'comm_not_found',
+                  interruptCommMatched: false,
+                },
+              },
+            ],
+          },
+          storageProbe: makeStorageProbe(),
+        },
+      },
+    });
+
+    await runtime.refresh();
+
+    expect(runtime.listProviderDiagnostics()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          provider: 'claude',
+          runtimeCapture: expect.objectContaining({
+            captured: true,
+            knownChannelRefs: ['live-channel-42'],
+          }),
+          discoveredSessions: [
+            expect.objectContaining({
+              runtimeDiagnostics: expect.objectContaining({
+                runtimeProviderSessionRef: 'runtime-ref-1',
+                runtimeChannelRef: 'live-channel-42',
+                interruptBridgeState: 'comm_not_found',
+                interruptCommMatched: false,
+              }),
+            }),
+          ],
+        }),
+      ]),
+    );
+  });
+
   it('routes runtime actions and normalizes broker events', async () => {
     const runtimeProbe = makeRuntimeProbe();
     const runtime = new CompanionRuntime({

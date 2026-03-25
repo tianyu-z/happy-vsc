@@ -1,3 +1,7 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -16,6 +20,7 @@ function makeExtension(
     isActive: false,
     packageJSON: {
       version: '1.2.3',
+      main: './extension.cjs',
     },
     exports: undefined,
     activate,
@@ -100,6 +105,34 @@ describe('ProviderHostRegistry', () => {
     });
   });
 
+  it('matches provider extensions case-insensitively for publisher casing differences', async () => {
+    const activate = vi.fn(async () => ({
+      runtimeBridge: {
+        watchSession: vi.fn(),
+      },
+    }));
+    const extension = makeExtension({
+      id: 'Anthropic.claude-code',
+      activate,
+    });
+    const registry = new ProviderHostRegistry(
+      makeVscodeHost({
+        extensions: [extension],
+      }),
+    );
+
+    await expect(registry.resolve('claude')).resolves.toMatchObject({
+      provider: 'claude',
+      compatibility: 'supported',
+      activationState: 'active',
+      providerExtension: {
+        id: 'anthropic.claude-code',
+        version: '1.2.3',
+      },
+    });
+    expect(activate).toHaveBeenCalledTimes(1);
+  });
+
   it('returns unknown compatibility when activation fails', async () => {
     const extension = makeExtension({
       id: 'openai.chatgpt',
@@ -128,6 +161,40 @@ describe('ProviderHostRegistry', () => {
       commands: ['chatgpt.newCodexPanel'],
       exportKeys: [],
       host: null,
+    });
+  });
+
+  it('captures static module export keys from the activated extension entrypoint', async () => {
+    const extensionRoot = join(
+      tmpdir(),
+      `happy-provider-registry-${Date.now()}`,
+    );
+    await mkdir(extensionRoot, { recursive: true });
+    const entryPath = join(extensionRoot, 'extension.cjs');
+    await writeFile(
+      entryPath,
+      'module.exports = { activate() {}, deactivate() {}, openTabs() {} };',
+      'utf8',
+    );
+
+    const require = createRequire(import.meta.url);
+    require(entryPath);
+
+    const extension = makeExtension({
+      isActive: true,
+      extensionPath: extensionRoot,
+      activate: vi.fn(async () => undefined),
+    });
+    const registry = new ProviderHostRegistry(
+      makeVscodeHost({
+        extensions: [extension],
+      }),
+    );
+
+    await expect(registry.resolve('claude')).resolves.toMatchObject({
+      provider: 'claude',
+      exportKeys: [],
+      moduleExportKeys: ['activate', 'deactivate', 'openTabs'],
     });
   });
 });

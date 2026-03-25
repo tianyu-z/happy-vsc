@@ -7,12 +7,11 @@ import type {
 } from '../../providers/types';
 import type {
   Compatibility,
+  ProviderActivationState,
   ProviderExtension,
   RuntimeSessionEvidence,
   StorageSessionEvidence,
 } from '../types';
-
-export type ProviderActivationState = 'active' | 'inactive' | 'missing';
 
 export interface ProviderProbeHost {
   readonly provider: BrokerProvider;
@@ -33,6 +32,7 @@ export type ProviderHostResolution = {
   commands: string[];
   contextKeys: string[];
   exportKeys: string[];
+  moduleExportKeys: string[];
   host: ProviderProbeHost | null;
 };
 

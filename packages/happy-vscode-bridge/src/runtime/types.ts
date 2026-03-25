@@ -9,6 +9,7 @@ export type DesiredMode = 'runtime_preferred' | 'storage_preferred';
 export type EffectiveMode = 'runtime' | 'storage';
 export type ModeReason = string;
 export type Compatibility = 'supported' | 'unknown' | 'incompatible';
+export type ProviderActivationState = 'active' | 'inactive' | 'missing';
 export type RuntimeHealth = 'ready' | 'degraded' | 'unavailable';
 export type StorageHealth = 'ready' | 'stale' | 'unavailable';
 
@@ -28,6 +29,22 @@ export type WorkspaceLocator = {
   folderUris?: string[];
 };
 
+export type ProviderRuntimeCaptureDiagnostic = {
+  captured: boolean;
+  patchedHostCount: number;
+  providerKeys: string[];
+  providerMethods: string[];
+  commCount: number | null;
+  knownChannelRefs: string[];
+};
+
+export type RuntimeSessionBridgeDiagnostic = {
+  runtimeProviderSessionRef: string | null;
+  runtimeChannelRef: string | null;
+  interruptBridgeState: string | null;
+  interruptCommMatched: boolean | null;
+};
+
 export type RuntimeSessionEvidence = {
   providerSessionRef: string;
   title?: string;
@@ -39,6 +56,7 @@ export type RuntimeSessionEvidence = {
   capabilities?: string[];
   degradedFlags?: string[];
   attachability?: BrokerAttachability;
+  bridgeDiagnostics?: RuntimeSessionBridgeDiagnostic;
   workspace: WorkspaceLocator;
 };
 
@@ -151,3 +169,30 @@ export type BridgeBrokerDiscoveredSession = BrokerDiscoveredSession &
   RuntimeMetadataProjection;
 
 export type BridgeBrokerSnapshot = BrokerSnapshot & RuntimeMetadataProjection;
+
+export type BridgeProviderDiagnosticSession = {
+  title: string;
+  attachability: BrokerAttachability;
+  capabilities: string[];
+  degradedFlags: string[];
+  desiredMode: DesiredMode;
+  effectiveMode: EffectiveMode;
+  modeReason: ModeReason;
+  probeHealth: ProbeHealth;
+  runtimeDiagnostics: RuntimeSessionBridgeDiagnostic | null;
+};
+
+export type BridgeProviderDiagnostic = {
+  provider: BrokerProvider;
+  compatibility: Compatibility;
+  activationState: ProviderActivationState;
+  providerExtension: ProviderExtension;
+  commands: string[];
+  contextKeys: string[];
+  exportKeys: string[];
+  moduleExportKeys: string[];
+  runtimeCapture: ProviderRuntimeCaptureDiagnostic | null;
+  hasRuntimeProbe: boolean;
+  hasStorageProbe: boolean;
+  discoveredSessions: BridgeProviderDiagnosticSession[];
+};
