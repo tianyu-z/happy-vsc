@@ -17,6 +17,7 @@ import { writeDaemonState, DaemonLocallyPersistedState, readDaemonState, acquire
 
 import { cleanupDaemonState, isDaemonRunningCurrentlyInstalledHappyVersion, stopDaemon } from './controlClient';
 import { startDaemonControlServer } from './controlServer';
+import { findReusableBrokerSession } from './brokerSessionReuse';
 import { buildSpawnEnvironment, waitForSessionWebhook } from './sessionStartup';
 import { readFileSync } from 'fs';
 import { execSync, exec, type ChildProcess } from 'child_process';
@@ -645,6 +646,16 @@ export async function startDaemon(): Promise<void> {
           return {
             type: 'error',
             errorMessage: 'brokerSessionId is required for broker_attached sessions',
+          };
+        }
+        const reusableSession = findReusableBrokerSession(
+          pidToTrackedSession,
+          options.brokerSessionId,
+        );
+        if (reusableSession?.happySessionId) {
+          return {
+            type: 'success',
+            sessionId: reusableSession.happySessionId,
           };
         }
 
