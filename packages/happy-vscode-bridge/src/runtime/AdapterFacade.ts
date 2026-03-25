@@ -45,6 +45,7 @@ export class AdapterFacade {
 
   async discover(): Promise<BridgeBrokerDiscoveredSession[]> {
     const sessions = await this.runtime.refresh();
+    this.store.replaceDiscoveredSessions(sessions);
     for (const session of sessions) {
       this.store.append(session.brokerSessionId, {
         type: 'session.discovered',

@@ -7,7 +7,6 @@ import type {
   WorkspaceLocator,
 } from '../../types';
 import type { ProviderHostResolution, RuntimeProbe } from '../types';
-import { claudeProbeFixtures } from './claudeProbeFixtures';
 
 type ClaudeRuntimeProbeSession = {
   providerSessionRef: string;
@@ -80,9 +79,7 @@ export class ClaudeRuntimeProbe implements RuntimeProbe {
 
     return sessions.map((session) => {
       const capabilities: string[] = [];
-      const degradedFlags: string[] = [
-        ...claudeProbeFixtures.failurePolicy.degradedFlags,
-      ];
+      const degradedFlags: string[] = [];
 
       if (this.options.sendMessage) {
         capabilities.push('sendUserMessage');
@@ -128,7 +125,7 @@ export class ClaudeRuntimeProbe implements RuntimeProbe {
         attachability: resolveAttachability(
           session.canAttach === false
             ? 'not_attachable'
-            : claudeProbeFixtures.failurePolicy.attachability,
+            : 'attachable',
           unique(degradedFlags),
         ),
       };

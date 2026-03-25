@@ -3,7 +3,6 @@ import type { BrokerAttachability } from 'happy-wire';
 import type { BrokerEditorContext, ProviderEvent } from '../../../providers/types';
 import type { RuntimeSessionEvidence, WorkspaceLocator } from '../../types';
 import type { ProviderHostResolution, RuntimeProbe } from '../types';
-import { codexProbeFixtures } from './codexProbeFixtures';
 
 type CodexRuntimeProbeSession = {
   providerSessionRef: string;
@@ -75,9 +74,7 @@ export class CodexRuntimeProbe implements RuntimeProbe {
 
     return sessions.map((session) => {
       const capabilities: string[] = [];
-      const degradedFlags: string[] = [
-        ...codexProbeFixtures.failurePolicy.degradedFlags,
-      ];
+      const degradedFlags: string[] = [];
 
       if (this.options.sendMessage) {
         capabilities.push('sendUserMessage');
@@ -128,7 +125,7 @@ export class CodexRuntimeProbe implements RuntimeProbe {
         attachability: resolveAttachability(
           session.canAttach === false
             ? 'not_attachable'
-            : codexProbeFixtures.failurePolicy.attachability,
+            : 'attachable',
           stableDegradedFlags,
         ),
       };

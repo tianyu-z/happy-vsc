@@ -177,4 +177,49 @@ describe('AdapterFacade', () => {
 
     expect(entries).toContain('session.attachment.added');
   });
+
+  it('replaces stale discovered sessions in the shared session store on each discover refresh', async () => {
+    const firstSession = makeDiscoveredSession();
+    const secondSession = {
+      ...makeDiscoveredSession(),
+      brokerSessionId: 'broker-sess-2',
+      title: 'Second Claude Session',
+    };
+    const runtime = {
+      refresh: vi
+        .fn()
+        .mockResolvedValueOnce([firstSession, secondSession])
+        .mockResolvedValueOnce([secondSession]),
+      listDiscoveredSessions: vi
+        .fn()
+        .mockReturnValueOnce([firstSession, secondSession])
+        .mockReturnValueOnce([secondSession]),
+      attachSession: vi.fn(async () => null),
+      sendMessage: vi.fn(async () => {}),
+      interruptSession: vi.fn(async () => {}),
+      resolveApproval: vi.fn(async () => {}),
+      captureEditorContext: vi.fn(async () => null),
+      listAttachments: vi.fn(async () => []),
+      setSessionDesiredMode: vi.fn(async () => secondSession),
+      watchBrokerEvents: vi.fn(async () => () => {}),
+      subscribe: vi.fn(() => () => {}),
+    };
+    const store = new SharedSessionStore();
+    const facade = new AdapterFacade({
+      runtime: runtime as never,
+      store,
+    });
+
+    await facade.discover();
+    expect(store.listDiscoveredSessions().map((session) => session.brokerSessionId)).toEqual([
+      'broker-sess-1',
+      'broker-sess-2',
+    ]);
+
+    await facade.discover();
+
+    expect(store.listDiscoveredSessions().map((session) => session.brokerSessionId)).toEqual([
+      'broker-sess-2',
+    ]);
+  });
 });

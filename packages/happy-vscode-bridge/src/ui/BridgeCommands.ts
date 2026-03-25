@@ -151,6 +151,17 @@ export function formatProviderDiagnosticsReport(params: {
         `- Runtime Capture: captured=${diagnostic.runtimeCapture.captured ? 'yes' : 'no'} | patchedHosts=${diagnostic.runtimeCapture.patchedHostCount} | comms=${diagnostic.runtimeCapture.commCount ?? 'n/a'}`,
       );
       lines.push(
+        `- Runtime Shared Hook: installed=${diagnostic.runtimeCapture.sharedHookInstalled ? 'yes' : 'no'} | target=${diagnostic.runtimeCapture.sharedHookTargetKind ?? 'none'}`,
+      );
+      if (diagnostic.runtimeCapture.sharedHookFailureReason) {
+        lines.push(
+          `- Runtime Shared Hook Reason: ${diagnostic.runtimeCapture.sharedHookFailureReason}`,
+        );
+      }
+      lines.push(
+        `- Runtime Capture Path: ${diagnostic.runtimeCapture.capturePath ?? 'none'}`,
+      );
+      lines.push(
         `- Runtime Capture Keys: ${formatValues(diagnostic.runtimeCapture.providerKeys)}`,
       );
       lines.push(

@@ -169,7 +169,6 @@ describe('Codex probes', () => {
 
     expect(session.degradedFlags).toEqual(
       expect.arrayContaining([
-        'runtime_probe_unverified',
         'read_only_attach',
         'interrupt_bridge_unavailable',
         'approval_bridge_unavailable',
@@ -203,7 +202,7 @@ describe('Codex probes', () => {
     const [session] = await probe.discoverSessions();
 
     expect(session.degradedFlags).toEqual(
-      expect.arrayContaining(['runtime_probe_unverified', 'attachment_bridge_unavailable']),
+      expect.arrayContaining(['attachment_bridge_unavailable']),
     );
   });
 

@@ -52,6 +52,10 @@ function makeRuntime() {
         runtimeCapture: {
           captured: true,
           patchedHostCount: 2,
+          sharedHookInstalled: true,
+          sharedHookTargetKind: 'instance',
+          sharedHookFailureReason: null,
+          capturePath: 'shared_ext_host_instance',
           providerKeys: ['allComms'],
           providerMethods: ['resolveWebviewView'],
           commCount: 1,
@@ -313,6 +317,12 @@ describe('bridge ui', () => {
     );
     expect(report).toContain(
       '- Runtime Capture: captured=yes | patchedHosts=2 | comms=1',
+    );
+    expect(report).toContain(
+      '- Runtime Shared Hook: installed=yes | target=instance',
+    );
+    expect(report).toContain(
+      '- Runtime Capture Path: shared_ext_host_instance',
     );
     expect(report).toContain(
       '- Runtime Capture Channel Refs: live-channel-42',

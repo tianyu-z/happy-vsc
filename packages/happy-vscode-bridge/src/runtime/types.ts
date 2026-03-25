@@ -29,9 +29,18 @@ export type WorkspaceLocator = {
   folderUris?: string[];
 };
 
+export type ProviderRuntimeCapturePath =
+  | 'window_host'
+  | 'shared_ext_host_instance'
+  | 'shared_ext_host_prototype';
+
 export type ProviderRuntimeCaptureDiagnostic = {
   captured: boolean;
   patchedHostCount: number;
+  sharedHookInstalled: boolean;
+  sharedHookTargetKind: 'instance' | 'prototype' | null;
+  sharedHookFailureReason: string | null;
+  capturePath: ProviderRuntimeCapturePath | null;
   providerKeys: string[];
   providerMethods: string[];
   commCount: number | null;

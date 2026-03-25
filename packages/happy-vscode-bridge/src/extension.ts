@@ -2,7 +2,14 @@ import { BrokerManifestStore } from './broker/BrokerManifestStore';
 import { BrokerServer, type BrokerAdapterHost } from './broker/BrokerServer';
 import { SharedSessionStore } from './broker/SharedSessionStore';
 import { ProviderHostRegistry } from './runtime/ProviderHostRegistry';
-import { installProviderRuntimeCapture } from './runtime/ProviderRuntimeCapture';
+import {
+  installProviderRuntimeCapture,
+  type MutableProviderRuntimeCaptureRegistry,
+} from './runtime/ProviderRuntimeCapture';
+import {
+  discoverSharedRegistrarCandidatesFromVscodeApi,
+  installExtHostSharedRegistrationCapture,
+} from './runtime/ExtHostSharedRegistrationCapture';
 import { AdapterFacade } from './runtime/AdapterFacade';
 import {
   CompanionRuntime,
@@ -51,6 +58,23 @@ type ActivateOptions = {
   createRuntime?: (
     options?: Parameters<typeof CompanionRuntime.create>[0],
   ) => Promise<CompanionRuntimeLike>;
+  installSharedCapture?: (params: {
+    vscode: NonNullable<ActivateOptions['vscode']>;
+    registry: MutableProviderRuntimeCaptureRegistry;
+    candidates?: unknown[];
+  }) =>
+    | {
+        diagnostics?: unknown;
+        dispose(): unknown;
+      }
+    | Promise<{
+        diagnostics?: unknown;
+        dispose(): unknown;
+      }>;
+  eagerlyActivateProviders?: (
+    vscode: NonNullable<ActivateOptions['vscode']>,
+  ) => Promise<void>;
+  sharedCaptureCandidates?: unknown[];
   token?: string;
   vscode?: {
     commands?: {
@@ -105,6 +129,12 @@ type ActivateOptions = {
     };
     Uri?: {
       parse(value: string): unknown;
+    };
+    chat?: {
+      registerChatSessionItemProvider?(
+        chatSessionType: string,
+        provider: unknown,
+      ): { dispose(): unknown };
     };
     extensions?:
       | unknown[]
@@ -178,6 +208,12 @@ async function loadVscodeHost() {
     Uri: {
       parse(value: string): unknown;
     };
+    chat: {
+      registerChatSessionItemProvider(
+        chatSessionType: string,
+        provider: unknown,
+      ): { dispose(): unknown };
+    };
     extensions: {
       all: unknown[];
       getExtension(id: string): unknown;
@@ -222,6 +258,23 @@ function listOpenTabs(vscode: ActivateOptions['vscode']): BridgeTabSnapshot[] {
   }
 
   return tabs;
+}
+
+function createSharedCaptureDiscoveryHost(
+  vscode: NonNullable<ActivateOptions['vscode']>,
+): NonNullable<ActivateOptions['vscode']> {
+  return {
+    window: {
+      registerWebviewViewProvider:
+        vscode.window?.registerWebviewViewProvider,
+      registerCustomEditorProvider:
+        vscode.window?.registerCustomEditorProvider,
+    },
+    chat: {
+      registerChatSessionItemProvider:
+        vscode.chat?.registerChatSessionItemProvider,
+    },
+  };
 }
 
 const eagerlyActivatedProviderExtensionIds = [
@@ -281,6 +334,7 @@ export async function activate(
   }
 
   const vscode = options.vscode ?? (await loadVscodeHost());
+  const sharedCaptureDiscoveryHost = createSharedCaptureDiscoveryHost(vscode);
   const registryCommands = vscode.commands?.getCommands
     ? {
         getCommands: (filterInternal?: boolean) =>
@@ -288,9 +342,40 @@ export async function activate(
       }
     : undefined;
   const createRuntime = options.createRuntime ?? CompanionRuntime.create;
+  const installSharedCapture =
+    options.installSharedCapture ??
+    (async (params: {
+      vscode: NonNullable<ActivateOptions['vscode']>;
+      registry: MutableProviderRuntimeCaptureRegistry;
+      candidates?: unknown[];
+    }) => {
+      const discovery =
+        params.candidates?.length
+          ? {
+              candidates: params.candidates,
+              failureReason: null,
+            }
+          : await discoverSharedRegistrarCandidatesFromVscodeApi(
+              params.vscode,
+            );
+
+      return installExtHostSharedRegistrationCapture({
+        vscodeHost: params.vscode,
+        registry: params.registry,
+        candidates: discovery.candidates,
+        failureReason: discovery.failureReason,
+      });
+    });
+  const activateProviders =
+    options.eagerlyActivateProviders ?? eagerlyActivateSupportedProviders;
   const exthostLogDir = resolveExthostLogDir(context.logUri?.fsPath);
   const providerRuntimeCapture = installProviderRuntimeCapture(vscode);
-  await eagerlyActivateSupportedProviders(vscode);
+  const sharedCapture = await installSharedCapture({
+    vscode: sharedCaptureDiscoveryHost,
+    registry: providerRuntimeCapture.registry as MutableProviderRuntimeCaptureRegistry,
+    candidates: options.sharedCaptureCandidates,
+  });
+  await activateProviders(vscode);
   const runtime =
     options.runtime ??
     (await createRuntime({
@@ -398,6 +483,7 @@ export async function activate(
   context.subscriptions.push(treeDataProvider);
   context.subscriptions.push(treeView);
   context.subscriptions.push(statusBar);
+  context.subscriptions.push(sharedCapture);
   context.subscriptions.push(providerRuntimeCapture);
   context.subscriptions.push(...commandDisposables);
   context.subscriptions.push({

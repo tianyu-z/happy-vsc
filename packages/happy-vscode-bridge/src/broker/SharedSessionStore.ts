@@ -56,6 +56,31 @@ export class SharedSessionStore {
       );
   }
 
+  replaceDiscoveredSessions(sessions: BridgeBrokerDiscoveredSession[]): void {
+    const activeSessionIds = new Set(sessions.map((session) => session.brokerSessionId));
+
+    for (const [sessionId, projection] of this.projections.entries()) {
+      if (!projection.discovered || activeSessionIds.has(sessionId)) {
+        continue;
+      }
+
+      delete projection.discovered;
+      if (!projection.snapshot) {
+        this.projections.delete(sessionId);
+        continue;
+      }
+
+      this.projections.set(sessionId, projection);
+    }
+
+    for (const session of sessions) {
+      const projection: SessionProjection =
+        this.projections.get(session.brokerSessionId) ?? {};
+      projection.discovered = session;
+      this.projections.set(session.brokerSessionId, projection);
+    }
+  }
+
   subscribe(callback: (entry: BrokerLogEntry) => void): () => void {
     this.subscribers.add(callback);
     return () => {

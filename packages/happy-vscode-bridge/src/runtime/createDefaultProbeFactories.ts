@@ -4,7 +4,10 @@ import { basename, dirname, join } from 'node:path';
 import type { BrokerProvider } from 'happy-wire';
 
 import type { ProviderEvent } from '../providers/types';
-import type { ProviderRuntimeCaptureRegistry } from './ProviderRuntimeCapture';
+import {
+  getTrackedCodexViewState,
+  type ProviderRuntimeCaptureRegistry,
+} from './ProviderRuntimeCapture';
 import { ClaudeRuntimeProbe } from './probes/claude/ClaudeRuntimeProbe';
 import { ClaudeStorageProbe } from './probes/claude/ClaudeStorageProbe';
 import { CodexRuntimeProbe } from './probes/codex/CodexRuntimeProbe';
@@ -45,6 +48,7 @@ type DefaultProbeFactoryOptions = {
   listTabs?: () => BridgeTabLike[] | Promise<BridgeTabLike[]>;
   watchPollMs?: number;
   providerCaptures?: ProviderRuntimeCaptureRegistry;
+  now?: () => number;
 };
 
 type ParsedSession = {
@@ -54,6 +58,48 @@ type ParsedSession = {
   conversationId: string;
   runtimeChannelRef?: string;
   workspace: WorkspaceLocator;
+};
+
+type CancellationTokenLike = {
+  isCancellationRequested?: boolean;
+  onCancellationRequested?: (
+    listener: () => void,
+  ) => {
+    dispose(): unknown;
+  };
+};
+
+type CodexCapturedChatSessionItem = {
+  id?: string;
+  label?: string;
+  resource?: BridgeUriLike;
+};
+
+type CodexCapturedChatSessionProvider = {
+  provideChatSessionItems?: (
+    token?: CancellationTokenLike,
+  ) => Promise<Iterable<unknown> | unknown[] | null | undefined> |
+    Iterable<unknown> |
+    unknown[] |
+    null |
+    undefined;
+};
+
+type CodexCapturedChatSessionController = {
+  refreshHandler?: (
+    token?: CancellationTokenLike,
+  ) => Promise<unknown> | unknown;
+  items?: Iterable<unknown> | unknown;
+};
+
+type CodexCapturedViewPanelState = {
+  initialRoute?: unknown;
+};
+
+type CodexCapturedViewProvider = {
+  editorPanels?: Iterable<unknown> | {
+    entries?(): Iterable<unknown>;
+  };
 };
 
 const exthostDirPattern = /^exthost\d+$/;
@@ -75,11 +121,20 @@ const codexCancelCommandId = 'workbench.action.chat.cancel';
 const codexUriScheme = 'openai-codex';
 const codexUriAuthority = 'route';
 const defaultWatchPollMs = 250;
+const codexRecentFallbackWindowMs = 7 * 24 * 60 * 60 * 1000;
+const codexRecentFallbackLimit = 5;
 const codexRuntimeSendCommandIds = [
   codexTypeCommandId,
   codexFocusInputCommandId,
   codexSubmitCommandId,
 ] as const;
+const emptyCancellationSubscription = {
+  dispose() {},
+};
+const noCancellationToken: CancellationTokenLike = {
+  isCancellationRequested: false,
+  onCancellationRequested: () => emptyCancellationSubscription,
+};
 
 type ClaudeLogRequest = {
   type?: string;
@@ -100,10 +155,30 @@ type ClaudeCapturedComm = {
     has?(ref: string): boolean;
   };
   interruptClaude?: (ref: string) => Promise<void>;
+  listSessions?: () => Promise<unknown> | unknown;
 };
 
 type ClaudeCapturedProvider = {
   allComms?: Iterable<unknown>;
+  sessionStates?: Iterable<unknown> | {
+    values?(): Iterable<unknown>;
+  };
+  activeSessionId?: string;
+};
+
+type ClaudeCapturedListSessionsResponse = {
+  sessions?: Iterable<unknown> | unknown[] | null | undefined;
+};
+
+type ClaudeCapturedHistorySession = {
+  id?: string;
+  summary?: string;
+  lastModified?: number;
+};
+
+type ClaudeCapturedSessionState = {
+  sessionId?: string;
+  title?: string;
 };
 
 type ClaudeInterruptBridgeState =
@@ -524,6 +599,166 @@ function buildClaudeBridgeDiagnostics(
   };
 }
 
+function unwrapClaudeCapturedSessionHistory(response: unknown): unknown[] {
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  return toArray(
+    (response as ClaudeCapturedListSessionsResponse | null | undefined)?.sessions,
+  );
+}
+
+function unwrapClaudeCapturedSessionStates(value: unknown): unknown[] {
+  const values = (value as {
+    values?: () => Iterable<unknown>;
+  } | null | undefined)?.values;
+  if (typeof values === 'function') {
+    try {
+      return Array.from(values.call(value));
+    } catch {
+      return [];
+    }
+  }
+
+  return unwrapCapturedChatSessionItems(
+    value as Iterable<unknown> | unknown[] | null | undefined,
+  );
+}
+
+function parseClaudeCapturedHistorySession(
+  item: unknown,
+  workspace: WorkspaceLocator,
+  fallbackSeq: number,
+): ParsedSession | null {
+  if (!item || typeof item !== 'object') {
+    return null;
+  }
+
+  const capturedSession = item as ClaudeCapturedHistorySession;
+  const providerSessionRef =
+    typeof capturedSession.id === 'string' &&
+    capturedSession.id.trim().length > 0
+      ? capturedSession.id.trim()
+      : null;
+  if (!providerSessionRef) {
+    return null;
+  }
+
+  const title =
+    typeof capturedSession.summary === 'string' &&
+    capturedSession.summary.trim().length > 0
+      ? capturedSession.summary.trim()
+      : 'Claude Session';
+  const latestSeq =
+    typeof capturedSession.lastModified === 'number' &&
+    Number.isFinite(capturedSession.lastModified)
+      ? Math.trunc(capturedSession.lastModified)
+      : fallbackSeq;
+
+  return {
+    providerSessionRef,
+    title,
+    latestSeq,
+    conversationId: providerSessionRef,
+    workspace,
+  };
+}
+
+function parseClaudeCapturedSessionState(
+  item: unknown,
+  workspace: WorkspaceLocator,
+  fallbackSeq: number,
+): ParsedSession | null {
+  if (!item || typeof item !== 'object') {
+    return null;
+  }
+
+  const sessionState = item as ClaudeCapturedSessionState;
+  const providerSessionRef =
+    typeof sessionState.sessionId === 'string' &&
+    sessionState.sessionId.trim().length > 0
+      ? sessionState.sessionId.trim()
+      : null;
+  if (!providerSessionRef) {
+    return null;
+  }
+
+  const title =
+    typeof sessionState.title === 'string' &&
+    sessionState.title.trim().length > 0
+      ? sessionState.title.trim()
+      : 'Claude Session';
+
+  return {
+    providerSessionRef,
+    title,
+    latestSeq: fallbackSeq,
+    conversationId: providerSessionRef,
+    workspace,
+  };
+}
+
+async function discoverCapturedClaudeSessions(
+  providerCapture: unknown,
+  workspace: WorkspaceLocator,
+): Promise<ParsedSession[]> {
+  const capturedProvider =
+    providerCapture as ClaudeCapturedProvider | null | undefined;
+  if (!capturedProvider) {
+    return [];
+  }
+
+  const sessions = new Map<string, ParsedSession>();
+  let seq = 0;
+
+  const addSession = (session: ParsedSession | null) => {
+    if (!session || sessions.has(session.providerSessionRef)) {
+      return;
+    }
+
+    sessions.set(session.providerSessionRef, session);
+  };
+
+  for (const candidate of toArray(capturedProvider.allComms)) {
+    const comm = candidate as ClaudeCapturedComm;
+    if (typeof comm.listSessions !== 'function') {
+      continue;
+    }
+
+    let response: unknown;
+    try {
+      response = await comm.listSessions.call(candidate);
+    } catch {
+      continue;
+    }
+
+    for (const item of unwrapClaudeCapturedSessionHistory(response)) {
+      addSession(
+        parseClaudeCapturedHistorySession(
+          item,
+          workspace,
+          ++seq,
+        ),
+      );
+    }
+  }
+
+  for (const item of unwrapClaudeCapturedSessionStates(
+    capturedProvider.sessionStates,
+  )) {
+    addSession(
+      parseClaudeCapturedSessionState(
+        item,
+        workspace,
+        ++seq,
+      ),
+    );
+  }
+
+  return Array.from(sessions.values());
+}
+
 function parseCodexLogs(
   contents: string[],
   workspace: WorkspaceLocator,
@@ -564,7 +799,13 @@ function parseCodexConversationUri(
     return null;
   }
 
-  const segments = (uri.path?.startsWith('/') ? uri.path.slice(1) : uri.path ?? '')
+  return parseCodexRouteSessionRef(uri.path);
+}
+
+function parseCodexRouteSessionRef(
+  path: string | null | undefined,
+): string | null {
+  const segments = (path?.startsWith('/') ? path.slice(1) : path ?? '')
     .split('/')
     .filter((segment: string) => segment.length > 0);
   if (segments.length < 2) {
@@ -576,6 +817,248 @@ function parseCodexConversationUri(
   }
 
   return segments[1] ?? null;
+}
+
+function toArray(value: Iterable<unknown> | unknown[] | null | undefined): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value &&
+    typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] ===
+      'function'
+  ) {
+    return Array.from(value as Iterable<unknown>);
+  }
+
+  return [];
+}
+
+function toEntryArray(value: unknown): [unknown, unknown][] {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) =>
+        Array.isArray(entry) && entry.length >= 2
+          ? ([entry[0], entry[1]] as [unknown, unknown])
+          : null,
+      )
+      .filter((entry): entry is [unknown, unknown] => entry !== null);
+  }
+
+  if (
+    typeof (value as { entries?: unknown }).entries === 'function'
+  ) {
+    try {
+      return toArray(
+        (
+          value as {
+            entries(): Iterable<unknown> | unknown[];
+          }
+        ).entries(),
+      )
+        .map((entry) =>
+          Array.isArray(entry) && entry.length >= 2
+            ? ([entry[0], entry[1]] as [unknown, unknown])
+            : null,
+        )
+        .filter((entry): entry is [unknown, unknown] => entry !== null);
+    } catch {
+      return [];
+    }
+  }
+
+  if (
+    typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] !==
+      'function'
+  ) {
+    return [];
+  }
+
+  return toArray(value as Iterable<unknown>)
+    .map((entry) =>
+      Array.isArray(entry) && entry.length >= 2
+        ? ([entry[0], entry[1]] as [unknown, unknown])
+        : null,
+    )
+    .filter((entry): entry is [unknown, unknown] => entry !== null);
+}
+
+function unwrapCapturedChatSessionItems(
+  value: Iterable<unknown> | unknown[] | null | undefined,
+): unknown[] {
+  return toArray(value).map((entry) => {
+    if (Array.isArray(entry) && entry.length >= 2) {
+      return entry[1];
+    }
+
+    return entry;
+  });
+}
+
+function parseCodexCapturedChatSessionItem(
+  item: unknown,
+  workspace: WorkspaceLocator,
+  latestSeq: number,
+): ParsedSession | null {
+  if (!item || typeof item !== 'object') {
+    return null;
+  }
+
+  const chatSessionItem = item as CodexCapturedChatSessionItem;
+  const providerSessionRef =
+    parseCodexConversationUri(chatSessionItem.resource) ??
+    (typeof chatSessionItem.id === 'string' && chatSessionItem.id.trim().length > 0
+      ? chatSessionItem.id.trim()
+      : null);
+  if (!providerSessionRef) {
+    return null;
+  }
+
+  const title =
+    typeof chatSessionItem.label === 'string' &&
+    chatSessionItem.label.trim().length > 0
+      ? chatSessionItem.label.trim()
+      : `Codex Thread ${providerSessionRef.slice(0, 8)}`;
+
+  return {
+    providerSessionRef,
+    title,
+    latestSeq,
+    conversationId: providerSessionRef,
+    workspace,
+  };
+}
+
+function parseCodexCapturedViewPanelSession(
+  panelState: unknown,
+  workspace: WorkspaceLocator,
+  latestSeq: number,
+): ParsedSession | null {
+  if (!panelState || typeof panelState !== 'object') {
+    return null;
+  }
+
+  const providerSessionRef = parseCodexRouteSessionRef(
+    (panelState as CodexCapturedViewPanelState).initialRoute as string | null | undefined,
+  );
+  if (!providerSessionRef) {
+    return null;
+  }
+
+  return {
+    providerSessionRef,
+    title: `Codex Thread ${providerSessionRef.slice(0, 8)}`,
+    latestSeq,
+    conversationId: providerSessionRef,
+    workspace,
+  };
+}
+
+async function discoverCapturedCodexSessions(
+  providerCapture: unknown,
+  workspace: WorkspaceLocator,
+): Promise<ParsedSession[]> {
+  const provideChatSessionItems = (
+    providerCapture as CodexCapturedChatSessionProvider | null | undefined
+  )?.provideChatSessionItems;
+
+  let items: Iterable<unknown> | unknown[] | null | undefined;
+  if (typeof provideChatSessionItems === 'function') {
+    try {
+      items = await provideChatSessionItems.call(
+        providerCapture,
+        noCancellationToken,
+      );
+    } catch {
+      return [];
+    }
+  } else {
+    const controller =
+      providerCapture as CodexCapturedChatSessionController | null | undefined;
+    if (typeof controller?.refreshHandler !== 'function') {
+      return [];
+    }
+
+    try {
+      await controller.refreshHandler.call(
+        providerCapture,
+        noCancellationToken,
+      );
+    } catch {
+      return [];
+    }
+
+    items = controller.items as Iterable<unknown> | unknown[] | null | undefined;
+  }
+
+  const sessions = new Map<string, ParsedSession>();
+  let seq = 0;
+  for (const item of unwrapCapturedChatSessionItems(items)) {
+    const session = parseCodexCapturedChatSessionItem(
+      item,
+      workspace,
+      ++seq,
+    );
+    if (!session) {
+      continue;
+    }
+
+    sessions.set(session.providerSessionRef, session);
+  }
+
+  return Array.from(sessions.values());
+}
+
+function discoverCapturedCodexViewSessions(
+  providerCapture: unknown,
+  workspace: WorkspaceLocator,
+): ParsedSession[] {
+  const editorPanels = (
+    providerCapture as CodexCapturedViewProvider | null | undefined
+  )?.editorPanels;
+  const sessions = new Map<string, ParsedSession>();
+  let seq = 0;
+
+  for (const [, panelState] of toEntryArray(editorPanels)) {
+    const session = parseCodexCapturedViewPanelSession(
+      panelState,
+      workspace,
+      ++seq,
+    );
+    if (!session) {
+      continue;
+    }
+
+    sessions.set(session.providerSessionRef, session);
+  }
+
+  const trackedViewState = getTrackedCodexViewState(providerCapture);
+  const trackedRefs = [
+    ...(trackedViewState?.sidebarSessionRef
+      ? [trackedViewState.sidebarSessionRef]
+      : []),
+    ...(trackedViewState?.panelSessionRefs ?? []),
+  ];
+  for (const providerSessionRef of trackedRefs) {
+    if (sessions.has(providerSessionRef)) {
+      continue;
+    }
+
+    sessions.set(providerSessionRef, {
+      providerSessionRef,
+      title: `Codex Thread ${providerSessionRef.slice(0, 8)}`,
+      latestSeq: ++seq,
+      conversationId: providerSessionRef,
+      workspace,
+    });
+  }
+
+  return Array.from(sessions.values());
 }
 
 async function discoverCodexTabs(
@@ -607,6 +1090,69 @@ async function discoverCodexTabs(
   }
 
   return Array.from(sessions.values());
+}
+
+function parseUuidV7TimestampMs(value: string): number | null {
+  const normalized = value.replace(/-/g, '');
+  if (normalized.length < 13 || normalized[12] !== '7') {
+    return null;
+  }
+
+  const timestampHex = normalized.slice(0, 12);
+  if (!/^[0-9a-f]{12}$/i.test(timestampHex)) {
+    return null;
+  }
+
+  const timestampMs = Number.parseInt(timestampHex, 16);
+  return Number.isFinite(timestampMs) ? timestampMs : null;
+}
+
+function selectPreferredCodexSessions(params: {
+  capturedSessions: ParsedSession[];
+  viewSessions: ParsedSession[];
+  tabSessions: ParsedSession[];
+  storageSessions: ParsedSession[];
+  nowMs: number;
+}): ParsedSession[] {
+  const scopedRefs = new Set(
+    [...params.tabSessions, ...params.storageSessions, ...params.viewSessions].map(
+      (session) => session.providerSessionRef,
+    ),
+  );
+
+  if (scopedRefs.size > 0) {
+    const overlappingCapturedSessions = params.capturedSessions.filter((session) =>
+      scopedRefs.has(session.providerSessionRef),
+    );
+
+    return mergeSessions(
+      params.tabSessions,
+      overlappingCapturedSessions,
+      params.storageSessions,
+      params.viewSessions,
+    );
+  }
+
+  const recentCapturedSessions = params.capturedSessions
+    .map((session) => ({
+      session,
+      timestampMs: parseUuidV7TimestampMs(session.providerSessionRef),
+    }))
+    .filter(
+      (entry) =>
+        entry.timestampMs !== null &&
+        params.nowMs >= entry.timestampMs &&
+        params.nowMs - entry.timestampMs <= codexRecentFallbackWindowMs,
+    )
+    .sort((left, right) => (right.timestampMs ?? 0) - (left.timestampMs ?? 0))
+    .slice(0, codexRecentFallbackLimit)
+    .map((entry) => entry.session);
+
+  if (recentCapturedSessions.length > 0) {
+    return recentCapturedSessions;
+  }
+
+  return params.capturedSessions.slice(0, codexRecentFallbackLimit);
 }
 
 function mergeSessions(...lists: ParsedSession[][]): ParsedSession[] {
@@ -682,10 +1228,20 @@ function createClaudeFactory(params: {
 }): ProviderProbeFactory {
   return async (resolution: ProviderHostResolution) => {
     const runtimeChannelRefs = new Map<string, string>();
+    const capturedClaudeProvider =
+      params.providerCaptures?.getCapturedProvider('claude') ?? null;
     const listStorageSessions = async () =>
       discoverStorageSessions('claude', params.exthostLogDir, params.workspace);
+    const listCapturedSessions = async () =>
+      discoverCapturedClaudeSessions(
+        capturedClaudeProvider,
+        params.workspace,
+      );
     const listSessions = async () => {
-      const sessions = await listStorageSessions();
+      const sessions = mergeSessions(
+        await listStorageSessions(),
+        await listCapturedSessions(),
+      );
       runtimeChannelRefs.clear();
       for (const session of sessions) {
         if (session.runtimeChannelRef) {
@@ -697,8 +1253,6 @@ function createClaudeFactory(params: {
       }
       return sessions;
     };
-    const capturedClaudeProvider =
-      params.providerCaptures?.getCapturedProvider('claude') ?? null;
     const runtimeCapture =
       params.providerCaptures?.getCaptureDiagnostic?.('claude') ?? null;
 
@@ -838,7 +1392,7 @@ function createClaudeFactory(params: {
             supportsInterrupt: Boolean(session.runtimeChannelRef),
             interruptBridgeAvailable:
               bridgeDiagnostics.interruptBridgeState === 'ready',
-            supportsApprovals: true,
+            supportsApprovals: false,
             eventStreamAvailable: Boolean(watchSession),
             bridgeDiagnostics,
             workspace: session.workspace,
@@ -886,14 +1440,33 @@ function createCodexFactory(params: {
   listTabs?: DefaultProbeFactoryOptions['listTabs'];
   watchPollMs?: number;
   providerCaptures?: ProviderRuntimeCaptureRegistry;
+  now?: DefaultProbeFactoryOptions['now'];
 }): ProviderProbeFactory {
   return async (resolution: ProviderHostResolution) => {
     const listStorageSessions = async () =>
       discoverStorageSessions('codex', params.exthostLogDir, params.workspace);
+    const listCapturedSessions = async () =>
+      discoverCapturedCodexSessions(
+        params.providerCaptures?.getCapturedChatSessionProvider?.('codex') ??
+          params.providerCaptures?.getCapturedProvider('codex') ??
+          null,
+        params.workspace,
+      );
+    const listViewSessions = async () =>
+      discoverCapturedCodexViewSessions(
+        params.providerCaptures?.getCapturedViewProvider?.('codex') ?? null,
+        params.workspace,
+      );
     const listTabSessions = async () =>
       discoverCodexTabs(params.listTabs, params.workspace);
     const listSessions = async () =>
-      mergeSessions(await listTabSessions(), await listStorageSessions());
+      selectPreferredCodexSessions({
+        capturedSessions: await listCapturedSessions(),
+        viewSessions: await listViewSessions(),
+        tabSessions: await listTabSessions(),
+        storageSessions: await listStorageSessions(),
+        nowMs: params.now?.() ?? Date.now(),
+      });
 
     const storageProbe = new CodexStorageProbe(resolution, {
       listSessions: listStorageSessions,
@@ -1020,7 +1593,7 @@ function createCodexFactory(params: {
           conversationId: session.conversationId,
           threadId: session.providerSessionRef,
           supportsInterrupt: true,
-          supportsApprovals: true,
+          supportsApprovals: false,
           eventStreamAvailable: Boolean(watchSession),
           workspace: session.workspace,
         }));

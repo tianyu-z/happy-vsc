@@ -128,7 +128,7 @@ describe('Claude probes', () => {
         degradedFlags: expect.arrayContaining([
           'interrupt_bridge_unavailable',
           'approval_bridge_unavailable',
-          'runtime_probe_unverified',
+          'event_stream_unavailable',
         ]),
         attachability: 'attachable_with_degraded_capabilities',
       },

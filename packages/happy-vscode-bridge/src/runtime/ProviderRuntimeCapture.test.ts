@@ -1,8 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { installProviderRuntimeCapture } from './ProviderRuntimeCapture';
+import {
+  createProviderRuntimeCaptureRegistry,
+  getTrackedCodexViewState,
+  installProviderRuntimeCapture,
+} from './ProviderRuntimeCapture';
 
 describe('ProviderRuntimeCapture', () => {
+  it('captures providers through a reusable registration entrypoint', () => {
+    const registry = createProviderRuntimeCaptureRegistry();
+    const claudeProvider = { name: 'claude-provider' };
+    const codexProvider = { name: 'codex-provider' };
+
+    registry.captureRegistration('claudeVSCodeSidebar', claudeProvider);
+    registry.captureRegistration('chatgpt.conversationEditor', codexProvider);
+
+    expect(registry.getCapturedProvider('claude')).toBe(claudeProvider);
+    expect(registry.getCapturedProvider('codex')).toBe(codexProvider);
+  });
+
   it('captures Claude and Codex live providers from VS Code registrations', () => {
     const registerWebviewViewProvider = vi.fn(() => ({
       dispose: vi.fn(),
@@ -36,6 +52,113 @@ describe('ProviderRuntimeCapture', () => {
     expect(capture.registry.getCapturedProvider('codex')).toBe(codexProvider);
     expect(registerWebviewViewProvider).toHaveBeenCalledTimes(1);
     expect(registerCustomEditorProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefers captured Codex chat session providers over later editor registrations', () => {
+    const registerCustomEditorProvider = vi.fn(() => ({
+      dispose: vi.fn(),
+    }));
+    const registerChatSessionItemProvider = vi.fn(() => ({
+      dispose: vi.fn(),
+    }));
+    const vscode = {
+      window: {
+        registerCustomEditorProvider,
+      },
+      chat: {
+        registerChatSessionItemProvider,
+      },
+    };
+    const codexChatProvider = {
+      provideChatSessionItems: vi.fn(async () => []),
+    };
+    const codexEditorProvider = {
+      resolveCustomTextEditor: vi.fn(),
+    };
+
+    const capture = installProviderRuntimeCapture(vscode);
+
+    vscode.chat.registerChatSessionItemProvider(
+      'openai-codex',
+      codexChatProvider,
+    );
+    vscode.window.registerCustomEditorProvider(
+      'chatgpt.conversationEditor',
+      codexEditorProvider,
+      {},
+    );
+
+    expect(capture.registry.getCapturedProvider('codex')).toBe(
+      codexChatProvider,
+    );
+    expect((capture.registry as any).getCapturedViewProvider('codex')).toBe(
+      codexEditorProvider,
+    );
+    expect(capture.registry.getCaptureDiagnostic('codex')).toMatchObject({
+      captured: true,
+      providerMethods: expect.arrayContaining(['resolveCustomTextEditor']),
+    });
+  });
+
+  it('exposes Codex view and chat captures separately while preferring the view capture in diagnostics', () => {
+    const registry = createProviderRuntimeCaptureRegistry();
+    const codexViewProvider = {
+      resolveCustomEditor: vi.fn(),
+      editorPanels: new Map(),
+    };
+    const codexChatProvider = {
+      provideChatSessionItems: vi.fn(async () => []),
+    };
+
+    registry.captureRegistration(
+      'chatgpt.conversationEditor',
+      codexViewProvider,
+    );
+    registry.captureChatSessionRegistration(
+      'openai-codex',
+      codexChatProvider,
+    );
+
+    expect((registry as any).getCapturedViewProvider('codex')).toBe(
+      codexViewProvider,
+    );
+    expect((registry as any).getCapturedChatSessionProvider('codex')).toBe(
+      codexChatProvider,
+    );
+    expect(registry.getCapturedProvider('codex')).toBe(codexChatProvider);
+    expect(registry.getCaptureDiagnostic('codex')).toMatchObject({
+      captured: true,
+      providerMethods: expect.arrayContaining(['resolveCustomEditor']),
+    });
+  });
+
+  it('tracks Codex sidebar route messages on the captured view provider', () => {
+    const registry = createProviderRuntimeCaptureRegistry();
+    const currentConversationId = '019d2218-b01b-7930-8671-cbd49da63926';
+    const sidebarWebview = {
+      postMessage: vi.fn(),
+    };
+    const codexViewProvider = {
+      sidebarView: {
+        webview: sidebarWebview,
+      },
+      postMessageToWebview: vi.fn(),
+    };
+
+    registry.captureRegistration('chatgpt.sidebarView', codexViewProvider);
+
+    const capturedViewProvider = (registry as any).getCapturedViewProvider(
+      'codex',
+    );
+    capturedViewProvider.postMessageToWebview(sidebarWebview, {
+      type: 'navigate-to-route',
+      path: `/local/${currentConversationId}`,
+    });
+
+    expect(getTrackedCodexViewState(capturedViewProvider)).toEqual({
+      sidebarSessionRef: currentConversationId,
+      panelSessionRefs: [],
+    });
   });
 
   it('restores original VS Code registration methods on dispose', () => {

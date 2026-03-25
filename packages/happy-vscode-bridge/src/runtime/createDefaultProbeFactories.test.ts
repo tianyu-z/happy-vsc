@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { createDefaultProbeFactories } from './createDefaultProbeFactories';
+import { createProviderRuntimeCaptureRegistry } from './ProviderRuntimeCapture';
+import type { ProviderRuntimeCaptureRegistry } from './ProviderRuntimeCapture';
 import type { ProviderHostResolution } from './probes/types';
 
 function makeResolution(
@@ -205,6 +207,451 @@ describe('createDefaultProbeFactories', () => {
     ]);
   });
 
+  it('discovers Codex sessions from a captured chat session provider when tabs and logs are absent', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'codex-chat-provider',
+    });
+    const codexConversationId = '019d230f-5c1d-7c39-8df7-0f85f6e5c002';
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: vi.fn(async () => undefined),
+      createUri: (value) => ({ value }),
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'codex'
+            ? {
+                provideChatSessionItems: vi.fn(async () => [
+                  {
+                    id: codexConversationId,
+                    label: 'Runtime-only Codex Session',
+                    resource: {
+                      scheme: 'openai-codex',
+                      authority: 'route',
+                      path: `/local/${codexConversationId}`,
+                      fsPath: `/local/${codexConversationId}`,
+                    },
+                  },
+                ]),
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      },
+    });
+
+    const probes = await factories.codex!(
+      makeResolution('codex', [
+        'vscode.openWith',
+        'type',
+        'workbench.action.chat.focusInput',
+        'workbench.action.chat.submit',
+        'workbench.action.chat.cancel',
+      ]),
+    );
+
+    const sessions = await probes.runtimeProbe!.discoverSessions();
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        providerSessionRef: codexConversationId,
+        threadId: codexConversationId,
+        title: 'Runtime-only Codex Session',
+        capabilities: expect.arrayContaining(['sendUserMessage', 'interrupt']),
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      }),
+    ]);
+  });
+
+  it('filters Codex captured history down to sessions scoped to the current window when log evidence exists', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'codex-chat-provider-filtered-by-log',
+      codexLog: `
+2026-03-24 07:06:53.694 [warning] [CodexMcpConnection] cli: message="codex_app_server::codex_message_processor: thread/resume overrides ignored for running thread 019d2218-b01b-7930-8671-cbd49da63926: config overrides were provided and ignored while running"
+      `.trim(),
+    });
+    const staleConversationId = '019c0000-0000-7000-8000-000000000000';
+    const currentConversationId = '019d2218-b01b-7930-8671-cbd49da63926';
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: vi.fn(async () => undefined),
+      createUri: (value) => ({ value }),
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'codex'
+            ? {
+                provideChatSessionItems: vi.fn(async () => [
+                  {
+                    id: staleConversationId,
+                    label: 'Stale Global Codex Session',
+                    resource: {
+                      scheme: 'openai-codex',
+                      authority: 'route',
+                      path: `/local/${staleConversationId}`,
+                      fsPath: `/local/${staleConversationId}`,
+                    },
+                  },
+                  {
+                    id: currentConversationId,
+                    label: 'Current Window Codex Session',
+                    resource: {
+                      scheme: 'openai-codex',
+                      authority: 'route',
+                      path: `/local/${currentConversationId}`,
+                      fsPath: `/local/${currentConversationId}`,
+                    },
+                  },
+                ]),
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      },
+    });
+
+    const probes = await factories.codex!(
+      makeResolution('codex', [
+        'vscode.openWith',
+        'type',
+        'workbench.action.chat.focusInput',
+        'workbench.action.chat.submit',
+        'workbench.action.chat.cancel',
+      ]),
+    );
+
+    const sessions = await probes.runtimeProbe!.discoverSessions();
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        providerSessionRef: currentConversationId,
+        title: 'Current Window Codex Session',
+        capabilities: expect.arrayContaining(['sendUserMessage', 'interrupt']),
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      }),
+    ]);
+  });
+
+  it('falls back to only recent Codex captured sessions when scoped signals are absent', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'codex-chat-provider-recent-fallback',
+    });
+    const recentConversationId = '019d2218-b01b-7930-8671-cbd49da63926';
+    const staleConversationId = '019c0000-0000-7000-8000-000000000000';
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: vi.fn(async () => undefined),
+      createUri: (value) => ({ value }),
+      now: () => Date.parse('2026-03-25T03:10:00.000Z'),
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'codex'
+            ? {
+                provideChatSessionItems: vi.fn(async () => [
+                  {
+                    id: recentConversationId,
+                    label: 'Recent Codex Session',
+                    resource: {
+                      scheme: 'openai-codex',
+                      authority: 'route',
+                      path: `/local/${recentConversationId}`,
+                      fsPath: `/local/${recentConversationId}`,
+                    },
+                  },
+                  {
+                    id: staleConversationId,
+                    label: 'Ancient Codex Session',
+                    resource: {
+                      scheme: 'openai-codex',
+                      authority: 'route',
+                      path: `/local/${staleConversationId}`,
+                      fsPath: `/local/${staleConversationId}`,
+                    },
+                  },
+                ]),
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      },
+    });
+
+    const probes = await factories.codex!(
+      makeResolution('codex', [
+        'vscode.openWith',
+        'type',
+        'workbench.action.chat.focusInput',
+        'workbench.action.chat.submit',
+        'workbench.action.chat.cancel',
+      ]),
+    );
+
+    const sessions = await probes.runtimeProbe!.discoverSessions();
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        providerSessionRef: recentConversationId,
+        title: 'Recent Codex Session',
+        capabilities: expect.arrayContaining(['sendUserMessage', 'interrupt']),
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      }),
+    ]);
+  });
+
+  it('filters Codex captured history down to sessions scoped to the current view provider panel when log and tab signals are absent', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'codex-chat-provider-filtered-by-view-panel',
+    });
+    const currentConversationId = '019d2218-b01b-7930-8671-cbd49da63926';
+    const staleConversationId = '019d2217-b01b-7930-8671-cbd49da63926';
+    const activePanel = {
+      webview: {
+        postMessage: vi.fn(),
+      },
+      viewColumn: 1,
+    };
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: vi.fn(async () => undefined),
+      createUri: (value) => ({ value }),
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'codex'
+            ? {
+                provideChatSessionItems: vi.fn(async () => [
+                  {
+                    id: currentConversationId,
+                    label: 'Current Window Codex Session',
+                    resource: {
+                      scheme: 'openai-codex',
+                      authority: 'route',
+                      path: `/local/${currentConversationId}`,
+                      fsPath: `/local/${currentConversationId}`,
+                    },
+                  },
+                  {
+                    id: staleConversationId,
+                    label: 'Stale Global Codex Session',
+                    resource: {
+                      scheme: 'openai-codex',
+                      authority: 'route',
+                      path: `/local/${staleConversationId}`,
+                      fsPath: `/local/${staleConversationId}`,
+                    },
+                  },
+                ]),
+              }
+            : null,
+        getCapturedViewProvider: (provider) =>
+          provider === 'codex'
+            ? {
+                editorPanels: new Map([
+                  [
+                    activePanel,
+                    {
+                      ready: true,
+                      pendingMessages: [],
+                      initialRoute: `/local/${currentConversationId}`,
+                    },
+                  ],
+                ]),
+                focusedView: {
+                  kind: 'panel',
+                  panel: activePanel,
+                },
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      } as ProviderRuntimeCaptureRegistry,
+    });
+
+    const probes = await factories.codex!(
+      makeResolution('codex', [
+        'vscode.openWith',
+        'type',
+        'workbench.action.chat.focusInput',
+        'workbench.action.chat.submit',
+        'workbench.action.chat.cancel',
+      ]),
+    );
+
+    const sessions = await probes.runtimeProbe!.discoverSessions();
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        providerSessionRef: currentConversationId,
+        title: 'Current Window Codex Session',
+        capabilities: expect.arrayContaining(['sendUserMessage', 'interrupt']),
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      }),
+    ]);
+  });
+
+  it('filters Codex captured history down to the tracked sidebar route when no panel or log scope exists', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'codex-chat-provider-filtered-by-sidebar-route',
+    });
+    const currentConversationId = '019d2218-b01b-7930-8671-cbd49da63926';
+    const staleConversationId = '019d2217-b01b-7930-8671-cbd49da63926';
+    const sidebarWebview = {
+      postMessage: vi.fn(),
+    };
+    const viewProvider = {
+      sidebarView: {
+        webview: sidebarWebview,
+        visible: true,
+      },
+      postMessageToWebview: vi.fn(),
+      navigateToRoute(path: string) {
+        this.postMessageToWebview(sidebarWebview, {
+          type: 'navigate-to-route',
+          path,
+        });
+      },
+    };
+    const registry = createProviderRuntimeCaptureRegistry();
+
+    registry.captureRegistration('chatgpt.sidebarView', viewProvider);
+    registry.captureChatSessionRegistration('openai-codex', {
+      provideChatSessionItems: vi.fn(async () => [
+        {
+          id: currentConversationId,
+          label: 'Current Sidebar Codex Session',
+          resource: {
+            scheme: 'openai-codex',
+            authority: 'route',
+            path: `/local/${currentConversationId}`,
+            fsPath: `/local/${currentConversationId}`,
+          },
+        },
+        {
+          id: staleConversationId,
+          label: 'Other Recent Codex Session',
+          resource: {
+            scheme: 'openai-codex',
+            authority: 'route',
+            path: `/local/${staleConversationId}`,
+            fsPath: `/local/${staleConversationId}`,
+          },
+        },
+      ]),
+    });
+
+    viewProvider.navigateToRoute(`/local/${currentConversationId}`);
+
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: vi.fn(async () => undefined),
+      createUri: (value) => ({ value }),
+      providerCaptures: registry,
+    });
+
+    const probes = await factories.codex!(
+      makeResolution('codex', [
+        'vscode.openWith',
+        'type',
+        'workbench.action.chat.focusInput',
+        'workbench.action.chat.submit',
+        'workbench.action.chat.cancel',
+      ]),
+    );
+
+    const sessions = await probes.runtimeProbe!.discoverSessions();
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        providerSessionRef: currentConversationId,
+        title: 'Current Sidebar Codex Session',
+        capabilities: expect.arrayContaining(['sendUserMessage', 'interrupt']),
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      }),
+    ]);
+  });
+
+  it('discovers Codex sessions from a backfilled chat session controller when the provider object was not captured directly', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'codex-chat-controller',
+    });
+    const codexConversationId = '019d230f-5c1d-7c39-8df7-0f85f6e5c004';
+    const items = new Map();
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: vi.fn(async () => undefined),
+      createUri: (value) => ({ value }),
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'codex'
+            ? {
+                items,
+                refreshHandler: vi.fn(async () => {
+                  items.set(
+                    `openai-codex://route/local/${codexConversationId}`,
+                    {
+                      id: codexConversationId,
+                      label: 'Backfilled Codex Session',
+                      resource: {
+                        scheme: 'openai-codex',
+                        authority: 'route',
+                        path: `/local/${codexConversationId}`,
+                        fsPath: `/local/${codexConversationId}`,
+                      },
+                    },
+                  );
+                }),
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      },
+    });
+
+    const probes = await factories.codex!(
+      makeResolution('codex', [
+        'vscode.openWith',
+        'type',
+        'workbench.action.chat.focusInput',
+        'workbench.action.chat.submit',
+        'workbench.action.chat.cancel',
+      ]),
+    );
+
+    const sessions = await probes.runtimeProbe!.discoverSessions();
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        providerSessionRef: codexConversationId,
+        threadId: codexConversationId,
+        title: 'Backfilled Codex Session',
+        capabilities: expect.arrayContaining(['sendUserMessage', 'interrupt']),
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      }),
+    ]);
+  });
+
   it('creates a Codex runtime probe that routes messages through VS Code chat commands', async () => {
     const fixture = await writeLogFixture({
       rootName: 'codex-runtime',
@@ -322,6 +769,9 @@ describe('createDefaultProbeFactories', () => {
     const [session] = await probes.runtimeProbe!.discoverSessions();
 
     expect(session.degradedFlags).not.toContain('event_stream_unavailable');
+    expect(session.degradedFlags).not.toContain('approval_bridge_unavailable');
+    expect(session.degradedFlags).not.toContain('runtime_probe_unverified');
+    expect(session.attachability).toBe('attachable');
   });
 
   it('watches Codex session state transitions from appended logs', async () => {
@@ -426,6 +876,71 @@ describe('createDefaultProbeFactories', () => {
       '98774e08-0c03-4d72-89cb-6a29ba6ae93a',
       'continue from the current context',
     );
+  });
+
+  it('discovers Claude sessions from a captured live comm history when logs are absent', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'claude-runtime-history',
+    });
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: vi.fn(async () => undefined),
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'claude'
+            ? {
+                allComms: new Set([
+                  {
+                    listSessions: vi.fn(async () => ({
+                      type: 'list_sessions_response',
+                      sessions: [
+                        {
+                          id: 'claude-session-2',
+                          lastModified: 200,
+                          summary: 'Second Claude Session',
+                        },
+                        {
+                          id: 'claude-session-1',
+                          lastModified: 100,
+                          summary: 'First Claude Session',
+                        },
+                      ],
+                    })),
+                  },
+                ]),
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      },
+    });
+
+    const probes = await factories.claude!(
+      makeResolution('claude', ['claude-vscode.primaryEditor.open']),
+    );
+
+    const sessions = await probes.runtimeProbe!.discoverSessions();
+
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        providerSessionRef: 'claude-session-2',
+        title: 'Second Claude Session',
+        capabilities: expect.arrayContaining(['sendUserMessage']),
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      }),
+      expect.objectContaining({
+        providerSessionRef: 'claude-session-1',
+        title: 'First Claude Session',
+        capabilities: expect.arrayContaining(['sendUserMessage']),
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      }),
+    ]);
   });
 
   it('bridges Claude interrupts through a captured live provider session', async () => {
@@ -542,6 +1057,9 @@ describe('createDefaultProbeFactories', () => {
     const [session] = await probes.runtimeProbe!.discoverSessions();
 
     expect(session.degradedFlags).not.toContain('event_stream_unavailable');
+    expect(session.degradedFlags).not.toContain('approval_bridge_unavailable');
+    expect(session.degradedFlags).not.toContain('runtime_probe_unverified');
+    expect(session.attachability).toBe('attachable');
   });
 
   it('watches Claude session state transitions from appended logs', async () => {
