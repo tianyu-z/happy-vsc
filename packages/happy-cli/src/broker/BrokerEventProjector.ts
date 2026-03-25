@@ -124,9 +124,6 @@ export class BrokerEventProjector {
     approvalId: string;
     decision: 'approve' | 'deny';
   }): void {
-    if (!this.pendingApprovals.has(payload.approvalId)) {
-      return;
-    }
     this.pendingApprovals.delete(payload.approvalId);
 
     this.session.updateAgentState((currentState) => {
@@ -152,9 +149,6 @@ export class BrokerEventProjector {
   }
 
   private handleApprovalDismissed(payload: { approvalId: string }): void {
-    if (!this.pendingApprovals.has(payload.approvalId)) {
-      return;
-    }
     this.pendingApprovals.delete(payload.approvalId);
 
     this.session.updateAgentState((currentState) => {

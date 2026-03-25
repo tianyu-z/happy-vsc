@@ -79,6 +79,73 @@ describe('BrokerEventProjector', () => {
     });
   });
 
+  it('resolves approvals after restart when pending in state', () => {
+    let state: any = {
+      requests: {
+        'approval-2': {
+          tool: 'Write',
+          arguments: { description: 'Apply patch', brokerApprovalId: 'approval-2' },
+          createdAt: 123,
+        },
+      },
+      completedRequests: {},
+    };
+    const updateAgentState = vi.fn((handler: (currentState: any) => any) => {
+      state = handler(state);
+    });
+
+    const projector = new BrokerEventProjector({
+      sendAgentMessage: vi.fn(),
+      keepAlive: vi.fn(),
+      updateAgentState,
+    });
+
+    projector.applyEvent({
+      type: 'session.approval.resolved',
+      brokerSessionId: 'broker-sess-1',
+      payload: { approvalId: 'approval-2', decision: 'approve' },
+    });
+
+    expect(state.requests?.['approval-2']).toBeUndefined();
+    expect(state.completedRequests?.['approval-2']).toMatchObject({
+      status: 'approved',
+    });
+  });
+
+  it('dismisses approvals after restart when pending in state', () => {
+    let state: any = {
+      requests: {
+        'approval-3': {
+          tool: 'Read',
+          arguments: { description: 'Inspect file', brokerApprovalId: 'approval-3' },
+          createdAt: 456,
+        },
+      },
+      completedRequests: {},
+    };
+    const updateAgentState = vi.fn((handler: (currentState: any) => any) => {
+      state = handler(state);
+    });
+
+    const projector = new BrokerEventProjector({
+      sendAgentMessage: vi.fn(),
+      keepAlive: vi.fn(),
+      updateAgentState,
+    });
+
+    projector.applyEvent({
+      type: 'session.approval.dismissed',
+      brokerSessionId: 'broker-sess-1',
+      payload: { approvalId: 'approval-3' },
+    });
+
+    expect(state.requests?.['approval-3']).toBeUndefined();
+    expect(state.completedRequests?.['approval-3']).toMatchObject({
+      status: 'canceled',
+      reason: 'dismissed',
+    });
+  });
+
   it('dedupes repeated run statuses', () => {
     const keepAlive = vi.fn();
     const projector = new BrokerEventProjector({
