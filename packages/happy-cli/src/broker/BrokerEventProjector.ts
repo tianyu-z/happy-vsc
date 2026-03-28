@@ -5,6 +5,7 @@ import type { BrokerEvent, BrokerProvider } from './brokerTypes';
 
 export type BrokerEventProjectorSession = {
   sendAgentMessage: (provider: BrokerProvider, body: ACPMessageData) => void;
+  sendUserTextMessage: (text: string) => void;
   keepAlive: (thinking: boolean, mode: 'local' | 'remote') => void;
   updateAgentState: (handler: (state: AgentState) => AgentState) => void;
 };
@@ -79,6 +80,8 @@ export class BrokerEventProjector {
       if (this.shouldSuppressUserEcho(text)) {
         return;
       }
+      this.session.sendUserTextMessage(text);
+      return;
     }
 
     this.session.sendAgentMessage(this.provider, { type: 'message', message: text });

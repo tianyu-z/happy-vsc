@@ -55,6 +55,13 @@ export const MetadataSchema = z.object({
         runtime: z.enum(['ready', 'degraded', 'unavailable']),
         storage: z.enum(['ready', 'stale', 'unavailable']),
     }).optional(),
+    windowInstanceId: z.string().optional(),
+    brokerWindowLabel: z.string().optional(),
+    brokerWorkspaceLabel: z.string().optional(),
+    brokerWorkspacePath: z.string().optional(),
+    brokerWindowOrdinal: z.number().optional(),
+    brokerWindowIsActive: z.boolean().optional(),
+    brokerWindowLastActiveAt: z.string().optional(),
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
     homeDir: z.string().optional(), // User's home directory on the machine
@@ -87,6 +94,46 @@ export const MetadataSchema = z.object({
     }).optional(),
     sessionIcon: z.string().optional(),
     completionDismissedAt: z.number().nullish(),
+}).superRefine((metadata, ctx) => {
+    if (metadata.sessionSource !== 'broker_attached') {
+        return;
+    }
+
+    const requiredFields = [
+        {
+            key: 'windowInstanceId',
+            value: metadata.windowInstanceId,
+        },
+        {
+            key: 'brokerWindowLabel',
+            value: metadata.brokerWindowLabel,
+        },
+        {
+            key: 'brokerWorkspaceLabel',
+            value: metadata.brokerWorkspaceLabel,
+        },
+        {
+            key: 'brokerWorkspacePath',
+            value: metadata.brokerWorkspacePath,
+        },
+        {
+            key: 'brokerWindowOrdinal',
+            value: metadata.brokerWindowOrdinal,
+        },
+    ] as const;
+
+    for (const field of requiredFields) {
+        const isMissing = typeof field.value === 'number'
+            ? !Number.isFinite(field.value)
+            : !field.value;
+        if (isMissing) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [field.key],
+                message: `${field.key} is required for broker-attached sessions`,
+            });
+        }
+    }
 });
 
 export type Metadata = z.infer<typeof MetadataSchema>;

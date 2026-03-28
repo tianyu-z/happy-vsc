@@ -7,6 +7,7 @@ describe('BrokerEventProjector', () => {
     const sendAgentMessage = vi.fn();
     const projector = new BrokerEventProjector({
       sendAgentMessage,
+      sendUserTextMessage: vi.fn(),
       keepAlive: vi.fn(),
       updateAgentState: vi.fn(),
     });
@@ -27,6 +28,7 @@ describe('BrokerEventProjector', () => {
     const sendAgentMessage = vi.fn();
     const projector = new BrokerEventProjector({
       sendAgentMessage,
+      sendUserTextMessage: vi.fn(),
       keepAlive: vi.fn(),
       updateAgentState: vi.fn(),
     });
@@ -41,6 +43,26 @@ describe('BrokerEventProjector', () => {
     expect(sendAgentMessage).not.toHaveBeenCalled();
   });
 
+  it('projects external user deltas into Happy user messages', () => {
+    const sendAgentMessage = vi.fn();
+    const sendUserTextMessage = vi.fn();
+    const projector = new BrokerEventProjector({
+      sendAgentMessage,
+      sendUserTextMessage,
+      keepAlive: vi.fn(),
+      updateAgentState: vi.fn(),
+    });
+
+    projector.applyEvent({
+      type: 'session.message.delta',
+      brokerSessionId: 'broker-sess-1',
+      payload: { role: 'user', text: 'continue from VS Code' },
+    });
+
+    expect(sendUserTextMessage).toHaveBeenCalledWith('continue from VS Code');
+    expect(sendAgentMessage).not.toHaveBeenCalled();
+  });
+
   it('moves approvals from pending to completed when resolved', () => {
     let state: any = {};
     const updateAgentState = vi.fn((handler: (currentState: any) => any) => {
@@ -49,6 +71,7 @@ describe('BrokerEventProjector', () => {
 
     const projector = new BrokerEventProjector({
       sendAgentMessage: vi.fn(),
+      sendUserTextMessage: vi.fn(),
       keepAlive: vi.fn(),
       updateAgentState,
     });
@@ -96,6 +119,7 @@ describe('BrokerEventProjector', () => {
 
     const projector = new BrokerEventProjector({
       sendAgentMessage: vi.fn(),
+      sendUserTextMessage: vi.fn(),
       keepAlive: vi.fn(),
       updateAgentState,
     });
@@ -129,6 +153,7 @@ describe('BrokerEventProjector', () => {
 
     const projector = new BrokerEventProjector({
       sendAgentMessage: vi.fn(),
+      sendUserTextMessage: vi.fn(),
       keepAlive: vi.fn(),
       updateAgentState,
     });
@@ -164,6 +189,7 @@ describe('BrokerEventProjector', () => {
 
     const projector = new BrokerEventProjector({
       sendAgentMessage: vi.fn(),
+      sendUserTextMessage: vi.fn(),
       keepAlive: vi.fn(),
       updateAgentState,
     });
@@ -186,6 +212,7 @@ describe('BrokerEventProjector', () => {
     const keepAlive = vi.fn();
     const projector = new BrokerEventProjector({
       sendAgentMessage: vi.fn(),
+      sendUserTextMessage: vi.fn(),
       keepAlive,
       updateAgentState: vi.fn(),
     });

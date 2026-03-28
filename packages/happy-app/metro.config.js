@@ -1,11 +1,38 @@
 const { getDefaultConfig } = require("expo/metro-config");
+const { getConfig } = require("@expo/config");
+const { resolveMainModuleName } = require("@expo/cli/build/src/start/server/middleware/ManifestMiddleware");
+const {
+  createBundleUrlPathFromExpoConfig,
+} = require("@expo/cli/build/src/start/server/middleware/metroOptions");
 const path = require("path");
 const fs = require("fs");
+const { rewriteWebHmrRequestUrl } = require("./sources/dev/rewriteWebHmrRequestUrl");
 
 const config = getDefaultConfig(__dirname, {
   // Enable CSS support for web
   isCSSEnabled: true,
 });
+const projectConfig = getConfig(__dirname, {
+  skipSDKVersionRequirement: true,
+});
+const webBundleRequestPath = createBundleUrlPathFromExpoConfig(
+  __dirname,
+  projectConfig.exp,
+  {
+    platform: "web",
+    mainModuleName: resolveMainModuleName(__dirname, {
+      pkg: projectConfig.pkg,
+      platform: "web",
+    }),
+    minify: false,
+    lazy: !process.env.EXPO_NO_METRO_LAZY,
+    mode: process.env.NODE_ENV === "production" ? "production" : "development",
+    engine: "hermes",
+    isExporting: false,
+    bytecode: false,
+  }
+);
+const defaultRewriteRequestUrl = config.server.rewriteRequestUrl;
 
 // Add support for .wasm files (required by Skia for all platforms)
 // Source: https://shopify.github.io/react-native-skia/docs/getting-started/installation/
@@ -47,6 +74,8 @@ config.transformer.getTransformOptions = async () => ({
 // /assets/.%2Fsources/... which Metro can't resolve. This middleware decodes the URL.
 config.server = {
   ...config.server,
+  rewriteRequestUrl: (url) =>
+    rewriteWebHmrRequestUrl(defaultRewriteRequestUrl(url), webBundleRequestPath),
   enhanceMiddleware: (middleware) => {
     return (req, res, next) => {
       // Decode URL-encoded path components (e.g., %2F -> /)

@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { reloadAppAsync } from 'expo';
 import { TokenStorage, AuthCredentials } from '@/auth/tokenStorage';
 import { syncCreate } from '@/sync/sync';
-import { clearPersistence } from '@/sync/persistence';
+import { resetLocalPersistenceAndAuth } from '@/sync/persistence';
 import { trackLogout } from '@/track';
 
 interface AuthContextType {
@@ -38,8 +38,7 @@ export function AuthProvider({ children, initialCredentials }: { children: React
 
     const logout = async () => {
         trackLogout();
-        clearPersistence();
-        await TokenStorage.removeCredentials();
+        await resetLocalPersistenceAndAuth(() => TokenStorage.removeCredentials());
 
         // Reload the entire JS bundle to reset all in-memory state (singletons, Zustand, socket, etc.)
         if (Platform.OS === 'web') {

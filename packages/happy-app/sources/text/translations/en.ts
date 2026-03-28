@@ -845,6 +845,15 @@ export const en: TranslationStructure = {
         brokerAttached: 'Broker attached',
         brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
         brokerLimitedCapabilities: 'Limited broker capabilities',
+        brokerRuntimeAttached: 'Runtime attached',
+        brokerRuntimeDegraded: 'Runtime degraded',
+        brokerStorageFallback: 'Storage fallback',
+        brokerStorageAttached: 'Storage attached',
+        brokerControlSync: {
+            interruptAndApproval: 'interrupt + approval synced',
+            interrupt: 'interrupt synced',
+            approval: 'approval synced',
+        },
         worktree: {
             title: 'Worktree',
             branch: 'Branch',
@@ -1360,6 +1369,14 @@ export const en: TranslationStructure = {
         brokerSessions: 'VS Code Companion Sessions',
         brokerSessionsUnavailable: 'Unable to load broker sessions',
         brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
+        brokerWindowGroupingUpgradeRequired: 'Upgrade CLI / bridge to group by VS Code window',
+        brokerReadOnlyAttachDescription: 'Read-only attach. You can inspect this session, but cannot send messages.',
+        brokerWindowHeader: {
+            activeWindow: 'Active Window',
+            sessions: ({ count }: { count: number }) => `${count} ${plural({ count, singular: 'session', plural: 'sessions' })}`,
+            degraded: ({ count }: { count: number }) => `${count} degraded`,
+            unavailable: 'Unavailable',
+        },
         brokerAttach: 'Attach',
         brokerProvider: {
             claude: 'Claude',
@@ -1371,6 +1388,7 @@ export const en: TranslationStructure = {
             not_attachable: 'Not attachable',
         },
         brokerDegradedFlags: {
+            unstable_session_identity: 'Session identity is unstable. Reopen or refresh VS Code before attaching.',
             read_only_attach: 'Read-only attach',
             interrupt_bridge_unavailable: 'Interrupts stay in VS Code',
             approval_bridge_unavailable: 'Approval requests stay in VS Code',

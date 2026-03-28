@@ -830,6 +830,15 @@ export const zhHant: TranslationStructure = {
         brokerAttached: 'Broker attached',
         brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
         brokerLimitedCapabilities: 'Limited broker capabilities',
+        brokerRuntimeAttached: '已連接執行階段',
+        brokerRuntimeDegraded: '執行階段能力已降級',
+        brokerStorageFallback: '已回退到儲存',
+        brokerStorageAttached: '已連接儲存',
+        brokerControlSync: {
+            interruptAndApproval: '中斷 + 審批已同步',
+            interrupt: '中斷已同步',
+            approval: '審批已同步',
+        },
         worktree: {
             title: 'Worktree',
             branch: '分支',
@@ -1345,6 +1354,14 @@ export const zhHant: TranslationStructure = {
         brokerSessions: 'VS Code Companion Sessions',
         brokerSessionsUnavailable: 'Unable to load broker sessions',
         brokerSessionsEmpty: 'Start a Claude or Codex session in VS Code to attach it here',
+        brokerWindowGroupingUpgradeRequired: '升級 CLI / bridge 後，才能按 VS Code 視窗分組',
+        brokerReadOnlyAttachDescription: '目前為唯讀附著。你可以查看此會話，但不能傳送訊息。',
+        brokerWindowHeader: {
+            activeWindow: '目前使用中的視窗',
+            sessions: ({ count }: { count: number }) => `${count} 個會話`,
+            degraded: ({ count }: { count: number }) => `${count} 個降級`,
+            unavailable: '不可用',
+        },
         brokerAttach: 'Attach',
         brokerProvider: {
             claude: 'Claude',
@@ -1356,6 +1373,7 @@ export const zhHant: TranslationStructure = {
             not_attachable: '不可附著',
         },
         brokerDegradedFlags: {
+            unstable_session_identity: '會話識別不穩定。請先在 VS Code 中重新開啟或重新整理，再嘗試附著。',
             read_only_attach: '只讀附著',
             interrupt_bridge_unavailable: '中斷操作仍需在 VS Code 中處理',
             approval_bridge_unavailable: '審批請求仍需在 VS Code 中處理',

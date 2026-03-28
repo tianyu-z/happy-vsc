@@ -111,6 +111,8 @@ export class UnifiedSessionRuntimeStore {
       brokerSessionId: record.brokerSessionId,
       provider: record.provider,
       latestSeq: record.latestSeq,
+      runtimeProviderSessionRef: record.runtimeProviderSessionRef ?? null,
+      storageProviderSessionRef: record.storageProviderSessionRef ?? null,
       capabilities: [...record.capabilities],
       degradedFlags: [...record.degradedFlags],
       desiredMode: record.desiredMode,

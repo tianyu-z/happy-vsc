@@ -23,7 +23,12 @@ function shouldHideMessageInChatList(message: Message): boolean {
     return message.kind === 'user-text' && isCompactionMarkerText(message.displayText ?? message.text);
 }
 
-export const ChatList = React.memo((props: { session: Session; onFillInput?: (text: string, allOptions?: string[]) => void; onLoadMore?: () => void }) => {
+export const ChatList = React.memo((props: {
+    session: Session;
+    onFillInput?: (text: string, allOptions?: string[]) => void;
+    onLoadMore?: () => void;
+    onScrollOffsetChange?: (offsetY: number) => void;
+}) => {
     const { messages, hasMore } = useSessionMessages(props.session.id);
     const profile = useProfile();
     const isSharedSession = !!(props.session.isShared || props.session.accessLevel);
@@ -35,6 +40,7 @@ export const ChatList = React.memo((props: { session: Session; onFillInput?: (te
             hasMore={hasMore}
             onFillInput={props.onFillInput}
             onLoadMore={props.onLoadMore}
+            onScrollOffsetChange={props.onScrollOffsetChange}
             isSharedSession={isSharedSession}
             currentUserId={profile.id}
         />
@@ -65,6 +71,7 @@ const ChatListInternal = React.memo((props: {
     hasMore: boolean,
     onFillInput?: (text: string, allOptions?: string[]) => void,
     onLoadMore?: () => void,
+    onScrollOffsetChange?: (offsetY: number) => void,
     isSharedSession: boolean,
     currentUserId: string,
 }) => {
@@ -160,7 +167,8 @@ const ChatListInternal = React.memo((props: {
         const offsetY = event.nativeEvent.contentOffset.y;
         const shouldShow = offsetY > SCROLL_THRESHOLD;
         visibilityControllerRef.current?.update(shouldShow);
-    }, []);
+        props.onScrollOffsetChange?.(offsetY);
+    }, [props.onScrollOffsetChange]);
 
     // Scroll to bottom when button is pressed
     const handleScrollToBottom = useCallback(() => {

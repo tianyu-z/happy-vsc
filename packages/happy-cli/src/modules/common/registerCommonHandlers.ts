@@ -128,6 +128,13 @@ export interface SpawnSessionOptions {
     brokerSessionId?: string;
     brokerUrl?: string;
     brokerRootDir?: string;
+    brokerWindowInstanceId?: string;
+    brokerWindowLabel?: string;
+    brokerWorkspaceLabel?: string;
+    brokerWorkspacePath?: string;
+    brokerWindowOrdinal?: number;
+    brokerWindowIsActive?: boolean;
+    brokerWindowLastActiveAt?: string;
     approvedNewDirectoryCreation?: boolean;
     agent?: 'claude' | 'codex' | 'gemini';
     token?: string;

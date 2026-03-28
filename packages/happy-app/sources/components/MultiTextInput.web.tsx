@@ -31,6 +31,7 @@ interface MultiTextInputProps {
     value: string;
     onChangeText: (text: string) => void;
     placeholder?: string;
+    editable?: boolean;
     maxHeight?: number;
     paddingTop?: number;
     paddingBottom?: number;
@@ -48,6 +49,7 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
         value,
         onChangeText,
         placeholder,
+        editable = true,
         maxHeight = 120,
         onKeyPress,
         onSelectionChange,
@@ -207,6 +209,7 @@ export const MultiTextInput = React.forwardRef<MultiTextInputHandle, MultiTextIn
                 onSelect={handleSelect}
                 onKeyDown={handleKeyDown}
                 maxRows={maxRows}
+                readOnly={!editable}
                 autoCapitalize="sentences"
                 autoCorrect="on"
                 autoComplete="off"

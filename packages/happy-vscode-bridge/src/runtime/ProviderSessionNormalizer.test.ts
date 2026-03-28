@@ -199,6 +199,35 @@ describe('ProviderSessionNormalizer', () => {
     expect(session.degradedFlags).toContain('unstable_session_identity');
   });
 
+  it('does not inherit storage-only degraded attachability when runtime identity is stable', () => {
+    const normalizer = new ProviderSessionNormalizer();
+
+    const session = normalizer.normalize({
+      provider: 'codex',
+      providerExtensionId: 'openai.chatgpt',
+      runtime: {
+        providerSessionRef: 'runtime-ref-1',
+        conversationId: 'conv-1',
+        attachability: 'attachable',
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      },
+      storage: {
+        providerSessionRef: 'storage-ref-1',
+        conversationId: 'conv-1',
+        attachability: 'attachable_with_degraded_capabilities',
+        degradedFlags: ['read_only_attach'],
+        workspace: {
+          folderUris: ['file:///workspace'],
+        },
+      },
+    });
+
+    expect(session.conversationIdentity).toBe('conv-1');
+    expect(session.attachability).toBe('attachable');
+  });
+
   it('uses transcript/state object ids as the final stable identity fallback', () => {
     const normalizer = new ProviderSessionNormalizer();
 

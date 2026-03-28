@@ -830,6 +830,15 @@ export const zhHans: TranslationStructure = {
         brokerAttached: '已通过 Broker 附着',
         brokerAttachedMessage: '此会话已附着到 VS Code 中的实时对话。',
         brokerLimitedCapabilities: 'Broker 能力受限',
+        brokerRuntimeAttached: '已连接运行时',
+        brokerRuntimeDegraded: '运行时能力已降级',
+        brokerStorageFallback: '已回退到存储',
+        brokerStorageAttached: '已连接存储',
+        brokerControlSync: {
+            interruptAndApproval: '中断 + 审批已同步',
+            interrupt: '中断已同步',
+            approval: '审批已同步',
+        },
         worktree: {
             title: 'Worktree',
             branch: '分支',
@@ -1345,6 +1354,14 @@ export const zhHans: TranslationStructure = {
         brokerSessions: 'VS Code Companion 会话',
         brokerSessionsUnavailable: '无法加载 broker 会话',
         brokerSessionsEmpty: '先在 VS Code 中启动 Claude 或 Codex 会话，再从这里附着',
+        brokerWindowGroupingUpgradeRequired: '升级 CLI / bridge 后，才能按 VS Code 窗口分组',
+        brokerReadOnlyAttachDescription: '当前为只读附着。你可以查看此会话，但不能发送消息。',
+        brokerWindowHeader: {
+            activeWindow: '当前活动窗口',
+            sessions: ({ count }: { count: number }) => `${count} 个会话`,
+            degraded: ({ count }: { count: number }) => `${count} 个降级`,
+            unavailable: '不可用',
+        },
         brokerAttach: '附着',
         brokerProvider: {
             claude: 'Claude',
@@ -1356,6 +1373,7 @@ export const zhHans: TranslationStructure = {
             not_attachable: '不可附着',
         },
         brokerDegradedFlags: {
+            unstable_session_identity: '会话标识不稳定。请先在 VS Code 中重新打开或刷新，再尝试附着。',
             read_only_attach: '只读附着',
             interrupt_bridge_unavailable: '中断操作仍需在 VS Code 中处理',
             approval_bridge_unavailable: '审批请求仍需在 VS Code 中处理',

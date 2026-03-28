@@ -803,6 +803,22 @@ export class ApiSessionClient extends EventEmitter {
         this.enqueueMessage(content);
     }
 
+    sendUserTextMessage(text: string) {
+        const content = {
+            role: 'user',
+            content: {
+                type: 'text',
+                text
+            },
+            meta: {
+                sentFrom: 'cli'
+            }
+        };
+
+        logger.debug('[SOCKET] Sending broker-projected user message');
+        this.enqueueMessage(content);
+    }
+
     /**
      * Send a batch of pre-built message content objects for backfill (session resume/copy).
      * Each item.content should be a complete message object (role + content) ready to encrypt.

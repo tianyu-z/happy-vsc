@@ -147,6 +147,7 @@ describe('CompanionRuntime', () => {
     expect(snapshot).toMatchObject({
       brokerSessionId: discovered[0].brokerSessionId,
       latestSeq: 7,
+      runtimeProviderSessionRef: 'runtime-ref-1',
       effectiveMode: 'runtime',
     });
 
@@ -201,6 +202,47 @@ describe('CompanionRuntime', () => {
         }),
       ]),
     );
+  });
+
+  it('keeps runtime-ready sessions attachable when storage is only a read-only fallback', async () => {
+    const runtime = new CompanionRuntime({
+      providerStates: {
+        claude: {
+          resolution: makeHostResolution(),
+          runtimeProbe: {
+            discoverSessions: async () => [
+              {
+                providerSessionRef: 'runtime-ref-1',
+                conversationId: 'conv-1',
+                title: 'Runtime Title',
+                latestSeq: 2,
+                workspace: {
+                  folderUris: ['file:///workspace'],
+                },
+                capabilities: ['sendUserMessage', 'interrupt'],
+                degradedFlags: [],
+                attachability: 'attachable',
+              },
+            ],
+          },
+          storageProbe: makeStorageProbe(),
+        },
+      },
+    });
+
+    const [session] = await runtime.refresh();
+
+    expect(session).toMatchObject({
+      title: 'Runtime Title',
+      effectiveMode: 'runtime',
+      modeReason: 'runtime_ready',
+      attachability: 'attachable',
+      degradedFlags: [],
+      probeHealth: {
+        runtime: 'ready',
+        storage: 'ready',
+      },
+    });
   });
 
   it('surfaces runtime capture and bridge diagnostics in provider diagnostics', async () => {

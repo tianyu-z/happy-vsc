@@ -1,6 +1,8 @@
 import type { ApiClient } from '../api/api';
 import type { ApiSessionClient } from '../api/apiSession';
 import type { AgentState, MachineMetadata, Metadata, Session, UserMessage } from '../api/types';
+import { backfillClaudeSessionHistory } from '../claude/utils/claudeBackfill';
+import { backfillCodexSessionHistory } from '../codex/utils/codexBackfill';
 import { createSessionMetadata } from '../utils/createSessionMetadata';
 
 import { BrokerClient } from './BrokerClient';
@@ -13,6 +15,10 @@ type BrokerRelayClient = Pick<
   BrokerClient,
   'attachSession' | 'interruptSession' | 'resolveApproval' | 'sendMessage'
 >;
+type BrokerAttachSnapshot = Exclude<
+  Awaited<ReturnType<BrokerRelayClient['attachSession']>>,
+  null
+>;
 type BrokerRelayEventStream = Pick<BrokerEventStream, 'subscribeEvents' | 'close'>;
 type RelaySession = Pick<
   ApiSessionClient,
@@ -20,9 +26,16 @@ type RelaySession = Pick<
   | 'onUserMessage'
   | 'rpcHandlerManager'
   | 'sendAgentMessage'
+  | 'sendUserTextMessage'
   | 'sessionId'
   | 'updateAgentState'
->;
+> &
+  Partial<
+    Pick<
+      ApiSessionClient,
+      'isConnected' | 'sendBackfillBatch' | 'sendClaudeSessionMessageBatch'
+    >
+  >;
 type OfflineReconnectionHandle = {
   cancel: () => void;
 };
@@ -50,6 +63,13 @@ export type BrokerRelayRunnerOptions = {
   brokerEventStream?: BrokerRelayEventStream;
   brokerSessionId: string;
   brokerUrl?: string;
+  brokerWindowInstanceId?: string;
+  brokerWindowLabel?: string;
+  brokerWorkspaceLabel?: string;
+  brokerWorkspacePath?: string;
+  brokerWindowOrdinal?: number;
+  brokerWindowIsActive?: boolean;
+  brokerWindowLastActiveAt?: string;
   machineMetadata: MachineMetadata;
   machineId: string;
   notifyDaemonSessionStarted?: (sessionId: string, metadata: Metadata) => Promise<unknown>;
@@ -69,6 +89,9 @@ export class BrokerRelayRunner {
     sendAgentMessage: (provider: 'claude' | 'codex', body: any) => {
       this.currentSession?.sendAgentMessage(provider, body);
     },
+    sendUserTextMessage: (text: string) => {
+      this.currentSession?.sendUserTextMessage?.(text);
+    },
     updateAgentState: (handler: (state: AgentState) => AgentState) => {
       this.currentSession?.updateAgentState(handler);
     },
@@ -79,6 +102,8 @@ export class BrokerRelayRunner {
   private currentSession: RelaySession | null = null;
   private reconnectionHandle: OfflineReconnectionHandle | null = null;
   private isRunning = false;
+  private historyBackfillComplete = false;
+  private historyBackfillPromise: Promise<void> | null = null;
   private resolveRun!: () => void;
   private rejectRun!: (error: Error) => void;
   private settled = false;
@@ -131,6 +156,13 @@ export class BrokerRelayRunner {
         brokerCompatibility: snapshot.compatibility,
         brokerProviderExtension: snapshot.providerExtension,
         brokerProbeHealth: snapshot.probeHealth,
+        windowInstanceId: this.options.brokerWindowInstanceId,
+        brokerWindowLabel: this.options.brokerWindowLabel,
+        brokerWorkspaceLabel: this.options.brokerWorkspaceLabel,
+        brokerWorkspacePath: this.options.brokerWorkspacePath,
+        brokerWindowOrdinal: this.options.brokerWindowOrdinal,
+        brokerWindowIsActive: this.options.brokerWindowIsActive,
+        brokerWindowLastActiveAt: this.options.brokerWindowLastActiveAt,
       });
       const sessionTag =
         this.options.sessionTag ??
@@ -149,6 +181,7 @@ export class BrokerRelayRunner {
         onSessionSwap: (session) => {
           this.currentSession = session;
           this.bindSession(session);
+          void this.scheduleAttachedHistoryBackfill(snapshot, session);
         },
         response,
         sessionTag,
@@ -158,6 +191,7 @@ export class BrokerRelayRunner {
       this.currentSession = setupResult.session;
       this.reconnectionHandle = setupResult.reconnectionHandle;
       this.bindSession(setupResult.session);
+      void this.scheduleAttachedHistoryBackfill(snapshot, setupResult.session);
       this.projector.applyEvent({
         type: 'session.snapshot',
         snapshot,
@@ -244,6 +278,79 @@ export class BrokerRelayRunner {
     }
     this.settled = true;
     this.resolveRun();
+  }
+
+  private scheduleAttachedHistoryBackfill(
+    snapshot: BrokerAttachSnapshot,
+    session: RelaySession,
+  ): Promise<void> {
+    if (this.historyBackfillComplete) {
+      return Promise.resolve();
+    }
+    if (this.historyBackfillPromise) {
+      return this.historyBackfillPromise;
+    }
+
+    this.historyBackfillPromise = this.runAttachedHistoryBackfill(snapshot, session)
+      .catch(() => {})
+      .finally(() => {
+        this.historyBackfillPromise = null;
+      });
+
+    return this.historyBackfillPromise;
+  }
+
+  private async runAttachedHistoryBackfill(
+    snapshot: BrokerAttachSnapshot,
+    session: RelaySession,
+  ): Promise<void> {
+    if (this.historyBackfillComplete) {
+      return;
+    }
+
+    const providerSessionRef =
+      snapshot.runtimeProviderSessionRef ?? snapshot.storageProviderSessionRef ?? null;
+    if (!providerSessionRef) {
+      return;
+    }
+
+    for (let i = 0; i < 15 && !session.isConnected?.(); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+
+    if (!session.isConnected?.()) {
+      return;
+    }
+
+    if (snapshot.provider === 'claude') {
+      if (!this.options.brokerWorkspacePath || !session.sendClaudeSessionMessageBatch) {
+        return;
+      }
+
+      await backfillClaudeSessionHistory({
+        workingDirectory: this.options.brokerWorkspacePath,
+        sessionId: providerSessionRef,
+        sendBatch: async (messages) => {
+          await session.sendClaudeSessionMessageBatch?.(messages, 'replace');
+        },
+      });
+      this.historyBackfillComplete = true;
+      return;
+    }
+
+    if (snapshot.provider === 'codex') {
+      if (!session.sendBackfillBatch) {
+        return;
+      }
+
+      await backfillCodexSessionHistory({
+        sessionIdOrPath: providerSessionRef,
+        sendBatch: async (messages) => {
+          await session.sendBackfillBatch?.(messages, 'replace');
+        },
+      });
+      this.historyBackfillComplete = true;
+    }
   }
 
   private fail(error: Error): void {

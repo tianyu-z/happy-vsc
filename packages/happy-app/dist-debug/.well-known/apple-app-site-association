@@ -1,0 +1,27 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "G365J5PZA2.com.hitosea.happy"
+        ],
+        "components": [
+          {
+            "/": "/v1/*",
+            "exclude": true,
+            "comment": "Exclude API routes from Universal Links"
+          },
+          {
+            "/": "*",
+            "comment": "Matches all other routes"
+          }
+        ]
+      }
+    ]
+  },
+  "activitycontinuation": {
+    "apps": [
+      "G365J5PZA2.com.hitosea.happy"
+    ]
+  }
+}

@@ -265,13 +265,14 @@ export function sessionRoutes(app: Fastify) {
                 tag: z.string(),
                 metadata: z.string(),
                 agentState: z.string().nullish(),
-                dataEncryptionKey: z.string().nullish()
+                dataEncryptionKey: z.string().nullish(),
+                refreshOnExisting: z.boolean().optional(),
             })
         },
         preHandler: app.authenticate
     }, async (request, reply) => {
         const userId = request.userId;
-        const { tag, metadata, dataEncryptionKey } = request.body;
+        const { tag, metadata, agentState, dataEncryptionKey, refreshOnExisting } = request.body;
 
         const session = await db.session.findFirst({
             where: {
@@ -280,6 +281,43 @@ export function sessionRoutes(app: Fastify) {
             }
         });
         if (session) {
+            if (refreshOnExisting) {
+                log(
+                    { module: 'session-create', sessionId: session.id, userId, tag },
+                    `Refreshing existing session payload for tag ${tag}`,
+                );
+
+                const updatedSession = await db.session.update({
+                    where: { id: session.id },
+                    data: {
+                        metadata,
+                        metadataVersion: session.metadataVersion + 1,
+                        agentState: agentState ?? null,
+                        agentStateVersion: agentState ? session.agentStateVersion + 1 : session.agentStateVersion,
+                        dataEncryptionKey: dataEncryptionKey
+                            ? new Uint8Array(Buffer.from(dataEncryptionKey, 'base64'))
+                            : null,
+                    }
+                });
+
+                return reply.send({
+                    session: {
+                        id: updatedSession.id,
+                        seq: updatedSession.seq,
+                        metadata: updatedSession.metadata,
+                        metadataVersion: updatedSession.metadataVersion,
+                        agentState: updatedSession.agentState,
+                        agentStateVersion: updatedSession.agentStateVersion,
+                        dataEncryptionKey: updatedSession.dataEncryptionKey ? Buffer.from(updatedSession.dataEncryptionKey).toString('base64') : null,
+                        active: updatedSession.active,
+                        activeAt: updatedSession.lastActiveAt.getTime(),
+                        createdAt: updatedSession.createdAt.getTime(),
+                        updatedAt: updatedSession.updatedAt.getTime(),
+                        lastMessage: null
+                    }
+                });
+            }
+
             log({ module: 'session-create', sessionId: session.id, userId, tag }, `Found existing session: ${session.id} for tag ${tag}`);
             return reply.send({
                 session: {

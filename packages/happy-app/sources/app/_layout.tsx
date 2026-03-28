@@ -15,7 +15,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { SidebarNavigator } from '@/components/SidebarNavigator';
 import sodium from '@/encryption/libsodium.lib';
-import { AppState, View, Platform } from 'react-native';
+import { AppState, View, Platform, Text, ActivityIndicator } from 'react-native';
 import { ModalProvider } from '@/modal';
 import { PostHogProvider } from 'posthog-react-native';
 import { tracking } from '@/track/tracking';
@@ -34,6 +34,8 @@ import { AsyncLock } from '@/utils/lock';
 import { storage } from '@/sync/storage';
 import { usePathname } from 'expo-router';
 import { useDootaskGlobalWebSocket } from '@/hooks/useDootaskGlobalWebSocket';
+import { bootstrapRootApp } from '@/bootstrap/rootBootstrap';
+import { RootErrorBoundary } from '@/bootstrap/rootErrorBoundary';
 
 let currentAppState: string = AppState.currentState;
 let currentSessionId: string | null = null;
@@ -115,10 +117,7 @@ if (Platform.OS === 'android') {
     });
 }
 
-export {
-    // Catch any errors thrown by the Layout component.
-    ErrorBoundary,
-} from 'expo-router';
+export const ErrorBoundary = RootErrorBoundary;
 
 // Configure splash screen
 SplashScreen.setOptions({
@@ -276,21 +275,26 @@ export default function RootLayout() {
     //
     const [initState, setInitState] = React.useState<{ credentials: AuthCredentials | null } | null>(null);
     React.useEffect(() => {
-        (async () => {
-            try {
-                await loadFonts();
-                await sodium.ready;
-                const credentials = await TokenStorage.getCredentials();
-                console.log('credentials', credentials);
-                if (credentials) {
-                    await syncRestore(credentials);
-                }
+        let cancelled = false;
 
-                setInitState({ credentials });
-            } catch (error) {
-                console.error('Error initializing:', error);
+        (async () => {
+            const result = await bootstrapRootApp({
+                loadFonts,
+                awaitSodiumReady: () => sodium.ready,
+                getCredentials: () => TokenStorage.getCredentials(),
+                restoreSync: (credentials) => syncRestore(credentials),
+                removeCredentials: () => TokenStorage.removeCredentials(),
+                logError: (...args) => console.error(...args),
+            });
+
+            if (!cancelled) {
+                setInitState(result);
             }
         })();
+
+        return () => {
+            cancelled = true;
+        };
     }, []);
 
     React.useEffect(() => {
@@ -313,7 +317,27 @@ export default function RootLayout() {
     //
 
     if (!initState) {
-        return null;
+        return (
+            <View
+                style={{
+                    flex: 1,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: theme.colors.groupped.background,
+                    gap: 12,
+                }}
+            >
+                <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+                <Text
+                    style={{
+                        color: theme.colors.textSecondary,
+                        fontSize: 14,
+                    }}
+                >
+                    Loading Happy...
+                </Text>
+            </View>
+        );
     }
 
     //

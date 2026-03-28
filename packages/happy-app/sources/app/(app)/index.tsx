@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as React from 'react';
 import { encodeBase64 } from "@/encryption/base64";
 import { authGetToken } from "@/auth/authGetToken";
-import { router, useRouter } from "expo-router";
+import { router, useLocalSearchParams, useRouter } from "expo-router";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { getRandomBytesAsync } from "expo-crypto";
 import { useIsLandscape } from "@/utils/responsive";
@@ -17,6 +17,22 @@ import { t } from '@/text';
 
 export default function Home() {
     const auth = useAuth();
+    const routeParams = useLocalSearchParams<{ id?: string | string[] }>();
+    const router = useRouter();
+    const legacyMachineId = getLegacyMachineId(routeParams.id);
+
+    React.useEffect(() => {
+        if (!legacyMachineId) {
+            return;
+        }
+
+        router.replace(`/machine/${legacyMachineId}` as any);
+    }, [legacyMachineId, router]);
+
+    if (legacyMachineId) {
+        return null;
+    }
+
     if (!auth.isAuthenticated) {
         return <NotAuthenticated />;
     }
@@ -174,6 +190,19 @@ function NotAuthenticated() {
             {isLandscape ? landscapeLayout : portraitLayout}
         </>
     )
+}
+
+function getLegacyMachineId(idParam: string | string[] | undefined): string | null {
+    const candidate = Array.isArray(idParam) ? idParam[0] : idParam;
+    if (!candidate) {
+        return null;
+    }
+
+    return isUuid(candidate) ? candidate : null;
+}
+
+function isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 const styles = StyleSheet.create((theme) => ({

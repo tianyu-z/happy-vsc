@@ -69,6 +69,8 @@ export const brokerSnapshotSchema = z
     brokerSessionId: z.string().min(1),
     provider: brokerProviderSchema,
     latestSeq: z.number().int().nonnegative(),
+    runtimeProviderSessionRef: z.string().min(1).nullable().optional(),
+    storageProviderSessionRef: z.string().min(1).nullable().optional(),
     capabilities: z.array(z.string()),
     degradedFlags: z.array(z.string()),
     ...brokerRuntimeMetadataShape,

@@ -92,6 +92,8 @@ interface AgentInputProps {
     fastMode?: boolean;
     onFastModeChange?: (enabled: boolean) => void;
     isSendDisabled?: boolean;
+    isInputDisabled?: boolean;
+    inputDisabledReason?: string;
     isSending?: boolean;
     minHeight?: number;
     profileId?: string | null;
@@ -104,11 +106,17 @@ interface AgentInputProps {
     onImageDrop?: (files: File[]) => void;
 }
 
-const agentFlavorIcons = {
-    claude: require('@/assets/images/icon-claude.png'),
-    codex: require('@/assets/images/icon-gpt.png'),
-    gemini: require('@/assets/images/icon-gemini.png'),
-};
+function getAgentFlavorIcon(agentType: 'claude' | 'codex' | 'gemini') {
+    switch (agentType) {
+        case 'codex':
+            return require('@/assets/images/icon-gpt.png');
+        case 'gemini':
+            return require('@/assets/images/icon-gemini.png');
+        case 'claude':
+        default:
+            return require('@/assets/images/icon-claude.png');
+    }
+}
 
 const stylesheet = StyleSheet.create((theme, runtime) => ({
     container: {
@@ -407,6 +415,8 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
     const contextWarning = props.usageData?.contextSize
         ? getContextWarning(props.usageData.contextSize, maxContextSize, props.alwaysShowContextSize ?? false, theme)
         : null;
+    const isInputDisabled = props.isInputDisabled ?? false;
+    const isSendButtonDisabled = isInputDisabled || props.isSendDisabled || props.isSending;
 
     const agentInputEnterToSend = useSetting('agentInputEnterToSend');
 
@@ -686,12 +696,12 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                     enterToSendEnabled: agentInputEnterToSend,
                     textSnapshot,
                     isSending: props.isSending,
-                    isSendDisabled: props.isSendDisabled,
+                    isSendDisabled: isSendButtonDisabled,
                 })) {
                     props.onSend(textSnapshot);
                     return true; // Key was handled
                 }
-                if (textSnapshot.trim() && (props.isSending || props.isSendDisabled)) {
+                if (textSnapshot.trim() && isSendButtonDisabled) {
                     return true;
                 }
             }
@@ -709,7 +719,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
 
         }
         return false; // Key was not handled
-    }, [suggestions, moveUp, moveDown, selected, handleSuggestionSelect, props.showAbortButton, props.onAbort, isAborting, handleAbortPress, agentInputEnterToSend, resolveSendSnapshot, props.onSend, props.permissionMode, props.onPermissionModeChange, props.isSending, props.isSendDisabled]);
+    }, [suggestions, moveUp, moveDown, selected, handleSuggestionSelect, props.showAbortButton, props.onAbort, isAborting, handleAbortPress, agentInputEnterToSend, resolveSendSnapshot, props.onSend, props.permissionMode, props.onPermissionModeChange, props.isSending, isSendButtonDisabled]);
 
     const connectionStatusIndicator = props.connectionStatus ? (
         <>
@@ -1431,6 +1441,22 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                         />
                     )}
 
+                    {props.inputDisabledReason ? (
+                        <View style={{
+                            paddingHorizontal: 12,
+                            paddingTop: 8,
+                            paddingBottom: 4,
+                        }}>
+                            <Text style={{
+                                fontSize: 12,
+                                color: isInputDisabled ? theme.colors.textDestructive : theme.colors.textSecondary,
+                                ...Typography.default(),
+                            }}>
+                                {props.inputDisabledReason}
+                            </Text>
+                        </View>
+                    ) : null}
+
                     {/* Input field */}
                     <View style={[styles.inputContainer, props.minHeight ? { minHeight: props.minHeight } : undefined]}>
                         <MultiTextInput
@@ -1443,6 +1469,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                             onKeyPress={handleKeyPress}
                             onStateChange={handleInputStateChange}
                             maxHeight={120}
+                            editable={!isInputDisabled}
                         />
                     </View>
 
@@ -1544,7 +1571,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                             };
                                             return (
                                                 <Image
-                                                    source={agentFlavorIcons[props.agentType as keyof typeof agentFlavorIcons] || agentFlavorIcons.claude}
+                                                    source={getAgentFlavorIcon(props.agentType)}
                                                     style={iconStyle}
                                                     contentFit="contain"
                                                     tintColor={isCodex ? theme.colors.button.secondary.tint : undefined}
@@ -1640,7 +1667,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                         hitSlop={{ top: 5, bottom: 10, left: 0, right: 0 }}
                                         onPress={() => {
                                             const textSnapshot = resolveSendSnapshot();
-                                            log.log(`[SEND_DEBUG][INPUT] press hasText=${hasText} latestLen=${latestTextRef.current.trim().length} stateLen=${inputState.text.trim().length} propLen=${props.value.trim().length} pickedLen=${textSnapshot.trim().length} mic=${props.onMicPress ? 'yes' : 'no'} disabled=${props.isSendDisabled || props.isSending ? 'yes' : 'no'}`);
+                                            log.log(`[SEND_DEBUG][INPUT] press hasText=${hasText} latestLen=${latestTextRef.current.trim().length} stateLen=${inputState.text.trim().length} propLen=${props.value.trim().length} pickedLen=${textSnapshot.trim().length} mic=${props.onMicPress ? 'yes' : 'no'} disabled=${isSendButtonDisabled ? 'yes' : 'no'}`);
                                             if (textSnapshot.trim()) {
                                                 hapticsLight();
                                                 props.onSend(textSnapshot);
@@ -1652,9 +1679,9 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                             }
                                         }}
                                         accessibilityState={{
-                                            disabled: !!(props.isSendDisabled || props.isSending || (!hasText && !props.onMicPress)),
+                                            disabled: !!(isSendButtonDisabled || (!hasText && !props.onMicPress)),
                                         }}
-                                        disabled={props.isSendDisabled || props.isSending}
+                                        disabled={isSendButtonDisabled}
                                     >
                                         {props.isSending ? (
                                             <ActivityIndicator

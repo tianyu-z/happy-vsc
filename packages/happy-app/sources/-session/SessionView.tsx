@@ -1,6 +1,8 @@
 import { AgentContentView } from '@/components/AgentContentView';
 import { AgentInput } from '@/components/AgentInput';
 import { Avatar } from '@/components/Avatar';
+import { BrokerAttachedDetailsSheet } from '@/components/BrokerAttachedDetailsSheet';
+import { BrokerAttachedStrip } from '@/components/BrokerAttachedStrip';
 import { MultiTextInputHandle } from '@/components/MultiTextInput';
 import { getSuggestions } from '@/components/autocomplete/suggestions';
 import { ChatHeaderView } from '@/components/ChatHeaderView';
@@ -27,13 +29,20 @@ import { tracking, trackMessageSent } from '@/track';
 import { handleImagePasteEvent } from '@/utils/imagePaste';
 import { isRunningOnMac } from '@/utils/platform';
 import { useDeviceType, useHeaderHeight, useIsLandscape, useIsTablet } from '@/utils/responsive';
-import { getBrokerSessionMetadataSummary } from '@/utils/brokerSessionUtils';
+import {
+    getBrokerSessionProviderLabel,
+    getBrokerSessionStripSummary,
+    isBrokerSessionReadOnly,
+} from '@/utils/brokerSessionUtils';
+import { BrokerStripMode, createBrokerStripStateController } from '@/utils/brokerStripState';
+import { navigateBackFromSession } from '@/utils/sessionNavigation';
 import { formatPathRelativeToHome, generateCopyTitle, getSessionAvatarId, getSessionName, useSessionStatus, copySessionMetadata } from '@/utils/sessionUtils';
 import { isVersionSupported, useLatestCliVersion } from '@/utils/versionUtils';
 import { log } from '@/log';
+import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as React from 'react';
 import { useMemo } from 'react';
 import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
@@ -43,9 +52,30 @@ import { useUnistyles } from 'react-native-unistyles';
 const SILENT_REFRESH_INDICATOR_DELAY_MS = 3000;
 const SILENT_REFRESH_FAILED_TIMEOUT_MS = 12000;
 
+function hasBrokerWindowAnchor(session: Session): boolean {
+    const metadata = session.metadata;
+
+    return metadata?.sessionSource === 'broker_attached'
+        && Boolean(metadata.windowInstanceId)
+        && Boolean(metadata.brokerWindowLabel)
+        && Boolean(metadata.brokerWorkspaceLabel);
+}
+
+function getBrokerProviderLabel(session: Session): 'claude' | 'codex' {
+    return session.metadata?.flavor === 'codex' ? 'codex' : 'claude';
+}
+
+function getNewestAgentMessageSignature(messages: ReturnType<typeof useSessionMessages>['messages']): string | null {
+    const newestAgentMessage = messages.find((message) => message.kind === 'agent-text');
+    return newestAgentMessage
+        ? `${newestAgentMessage.id}:${newestAgentMessage.text}`
+        : null;
+}
+
 export const SessionView = React.memo((props: { id: string }) => {
     const sessionId = props.id;
     const router = useRouter();
+    const routeParams = useLocalSearchParams<{ returnTo?: string | string[] }>();
     const session = useSession(sessionId);
     const isDataReady = useIsDataReady();
     const { theme } = useUnistyles();
@@ -59,6 +89,14 @@ export const SessionView = React.memo((props: { id: string }) => {
     const handleOpenSessionRuns = React.useCallback(() => {
         router.push(`/orchestrator?controllerSessionId=${encodeURIComponent(sessionId)}`);
     }, [router, sessionId]);
+    const handleBackPress = React.useCallback(() => {
+        navigateBackFromSession({
+            router,
+            sessionId,
+            session,
+            returnTo: routeParams.returnTo,
+        });
+    }, [routeParams.returnTo, router, session, sessionId]);
 
     // Track if we've confirmed the session doesn't exist after data loads
     const [sessionNotFound, setSessionNotFound] = React.useState(false);
@@ -176,7 +214,7 @@ export const SessionView = React.memo((props: { id: string }) => {
                 }}>
                     <ChatHeaderView
                         {...headerProps}
-                        onBackPress={() => router.back()}
+                        onBackPress={handleBackPress}
                         headerRight={session ? () => (
                             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                 <Pressable
@@ -291,6 +329,11 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
     const realtimeStatus = useRealtimeStatus();
     const { messages, isLoaded, fetchVersion } = useSessionMessages(sessionId);
     const pendingMessages = useSessionPendingMessages(sessionId);
+    const brokerDetailsSheetRef = React.useRef<BottomSheetModal>(null);
+    const brokerStripControllerRef = React.useRef<ReturnType<typeof createBrokerStripStateController> | null>(null);
+    const [brokerStripMode, setBrokerStripMode] = React.useState<BrokerStripMode>('hidden');
+    const lastBrokerAgentSignatureRef = React.useRef<string | null>(null);
+    const hasPrimedBrokerAgentSignatureRef = React.useRef(false);
     const acknowledgedCliVersions = useLocalSetting('acknowledgedCliVersions');
 
     // Check if CLI version is outdated and not already acknowledged
@@ -313,6 +356,52 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
     const latestMessageSnapshotRef = React.useRef({ isLoaded, messages, fetchVersion });
     latestMessageSnapshotRef.current = { isLoaded, messages, fetchVersion };
     const silentRefreshBaselineRef = React.useRef<{ isLoaded: boolean; messagesRef: typeof messages; fetchVersion: number } | null>(null);
+    const brokerReadOnly = React.useMemo(
+        () => isBrokerSessionReadOnly(session.metadata),
+        [session.metadata],
+    );
+    const showBrokerStrip = React.useMemo(
+        () => hasBrokerWindowAnchor(session),
+        [session],
+    );
+    const newestAgentMessageSignature = React.useMemo(
+        () => getNewestAgentMessageSignature(messages),
+        [messages],
+    );
+    const brokerProviderLabel = React.useMemo(
+        () => session.metadata?.sessionSource === 'broker_attached'
+            ? getBrokerSessionProviderLabel(getBrokerProviderLabel(session), t)
+            : null,
+        [session],
+    );
+    const brokerStripSummary = React.useMemo(
+        () => getBrokerSessionStripSummary(session.metadata, t) ?? t('sessionInfo.brokerAttached'),
+        [session.metadata],
+    );
+    const brokerLocationSummary = React.useMemo(() => {
+        const workspaceLabel = session.metadata?.brokerWorkspaceLabel;
+        const windowLabel = session.metadata?.brokerWindowLabel;
+
+        if (!workspaceLabel || !windowLabel) {
+            return '';
+        }
+
+        return workspaceLabel === windowLabel
+            ? windowLabel
+            : `${workspaceLabel} • ${windowLabel}`;
+    }, [session.metadata?.brokerWorkspaceLabel, session.metadata?.brokerWindowLabel]);
+    const brokerInputNotice = React.useMemo(() => {
+        if (session.metadata?.sessionSource !== 'broker_attached') {
+            return undefined;
+        }
+        if (!showBrokerStrip) {
+            return t('machine.brokerWindowGroupingUpgradeRequired');
+        }
+        if (brokerReadOnly) {
+            return t('machine.brokerReadOnlyAttachDescription');
+        }
+        return undefined;
+    }, [brokerReadOnly, session.metadata?.sessionSource, showBrokerStrip]);
 
     const startSilentRefreshTracking = React.useCallback(() => {
         const snapshot = latestMessageSnapshotRef.current;
@@ -331,6 +420,60 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
         setSilentRefreshTrackingKey((k) => k + 1);
         setSilentRefreshPhase('idle');
     }, []);
+
+    React.useEffect(() => {
+        if (!showBrokerStrip) {
+            brokerStripControllerRef.current?.dispose();
+            brokerStripControllerRef.current = null;
+            setBrokerStripMode('hidden');
+            return;
+        }
+
+        const controller = createBrokerStripStateController();
+        brokerStripControllerRef.current = controller;
+        setBrokerStripMode(controller.mode);
+
+        const unsubscribe = controller.subscribe((mode) => {
+            setBrokerStripMode(mode);
+        });
+
+        controller.onEnter();
+
+        return () => {
+            unsubscribe();
+            controller.dispose();
+            if (brokerStripControllerRef.current === controller) {
+                brokerStripControllerRef.current = null;
+            }
+        };
+    }, [showBrokerStrip, sessionId]);
+
+    React.useEffect(() => {
+        if (!showBrokerStrip) {
+            hasPrimedBrokerAgentSignatureRef.current = false;
+            lastBrokerAgentSignatureRef.current = null;
+            return;
+        }
+
+        if (!isLoaded) {
+            return;
+        }
+
+        if (!hasPrimedBrokerAgentSignatureRef.current) {
+            hasPrimedBrokerAgentSignatureRef.current = true;
+            lastBrokerAgentSignatureRef.current = newestAgentMessageSignature;
+            return;
+        }
+
+        if (
+            newestAgentMessageSignature
+            && newestAgentMessageSignature !== lastBrokerAgentSignatureRef.current
+        ) {
+            brokerStripControllerRef.current?.onAssistantDelta();
+        }
+
+        lastBrokerAgentSignatureRef.current = newestAgentMessageSignature;
+    }, [isLoaded, newestAgentMessageSignature, showBrokerStrip]);
 
     const isTracking = silentRefreshTrackingKey > 0;
 
@@ -753,7 +896,14 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
         <>
             <Deferred>
                 {messages.length > 0 && (
-                    <ChatList session={session} onFillInput={handleFillInput} onLoadMore={handleLoadMore} />
+                    <ChatList
+                        session={session}
+                        onFillInput={handleFillInput}
+                        onLoadMore={handleLoadMore}
+                        onScrollOffsetChange={showBrokerStrip
+                            ? (offsetY) => brokerStripControllerRef.current?.onScroll(offsetY)
+                            : undefined}
+                    />
                 )}
             </Deferred>
         </>
@@ -800,27 +950,9 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             onDelete={handleDeletePending}
         />
     ) : null;
-    const brokerMetadataSummary = React.useMemo(
-        () => getBrokerSessionMetadataSummary(session.metadata, t),
-        [session.metadata],
-    );
-    const brokerMetadataNotice = brokerMetadataSummary ? (
-        <View style={{
-            paddingHorizontal: 16,
-            paddingBottom: 4,
-        }}>
-            <Text style={{
-                fontSize: 11,
-                color: session.metadata?.brokerDegradedFlags?.length ? theme.colors.textDestructive : theme.colors.textSecondary,
-            }}>
-                {brokerMetadataSummary}
-            </Text>
-        </View>
-    ) : null;
     const betweenContentAndInput = (
         <>
             {pendingQueuePanel}
-            {brokerMetadataNotice}
         </>
     );
 
@@ -839,6 +971,9 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             onFastModeChange={updateFastMode}
             metadata={session.metadata}
             connectionStatus={inputConnectionStatus}
+            isInputDisabled={brokerReadOnly}
+            inputDisabledReason={brokerInputNotice}
+            isSendDisabled={brokerReadOnly}
             onSend={async (textSnapshot) => {
                 // Block sending during CLI upgrade
                 if (session.upgrading) {
@@ -892,6 +1027,7 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
 
                         if (result.success) {
                             failedMessageRef.current = null;
+                            brokerStripControllerRef.current?.onUserMessageSent();
                             trackMessageSent();
                         } else {
                             failedMessageRef.current = { localId: result.localId, content: contentForRetry };
@@ -998,6 +1134,15 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
 
             {/* Main content area - no padding since header is overlay */}
             <View style={{ flexBasis: 0, flexGrow: 1, paddingBottom: safeArea.bottom + ((isRunningOnMac() || Platform.OS === 'web') ? 32 : 0) }}>
+                {showBrokerStrip && brokerStripMode !== 'hidden' && brokerProviderLabel ? (
+                    <BrokerAttachedStrip
+                        mode={brokerStripMode}
+                        summary={brokerStripSummary}
+                        locationSummary={brokerLocationSummary}
+                        readOnly={brokerReadOnly}
+                        onPress={() => brokerDetailsSheetRef.current?.present()}
+                    />
+                ) : null}
                 <AgentContentView
                     content={content}
                     input={input}
@@ -1043,6 +1188,17 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
                     </Pressable>
                 )
             }
+
+            {showBrokerStrip && brokerProviderLabel ? (
+                <BrokerAttachedDetailsSheet
+                    ref={brokerDetailsSheetRef}
+                    sessionTitle={getSessionName(session)}
+                    providerLabel={brokerProviderLabel}
+                    summary={brokerStripSummary}
+                    readOnly={brokerReadOnly}
+                    metadata={session.metadata}
+                />
+            ) : null}
 
             {/* Duplicate Sheet */}
             <DuplicateSheet

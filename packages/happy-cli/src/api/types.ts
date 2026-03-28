@@ -382,6 +382,13 @@ export type Metadata = {
   brokerCompatibility?: BrokerCompatibility,
   brokerProviderExtension?: BrokerProviderExtension,
   brokerProbeHealth?: BrokerProbeHealth,
+  windowInstanceId?: string,
+  brokerWindowLabel?: string,
+  brokerWorkspaceLabel?: string,
+  brokerWorkspacePath?: string,
+  brokerWindowOrdinal?: number,
+  brokerWindowIsActive?: boolean,
+  brokerWindowLastActiveAt?: string,
   // Worktree metadata
   isWorktree?: boolean,
   worktreeBasePath?: string,

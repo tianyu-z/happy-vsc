@@ -6,13 +6,18 @@ import {
     getBrokerSessionAttachActionLabel,
     getBrokerSessionBadge,
     getBrokerSessionDegradedMessages,
+    getBrokerSessionDisabledReason,
     getBrokerSessionRuntimeDetails,
+    getBrokerSessionStripSummary,
     getBrokerSessionMetadataSummary,
     getBrokerSessionProviderLabel,
+    getBrokerWindowHeaderSummary,
+    isBrokerSessionReadOnly,
 } from './brokerSessionUtils';
 
 describe('brokerSessionUtils', () => {
-    const translate = (key: string): string => `t:${key}`;
+    const translate = (key: string, params?: Record<string, unknown>): string =>
+        params ? `t:${key}:${JSON.stringify(params)}` : `t:${key}`;
 
     it('labels broker-attached sessions as broker-backed', () => {
         expect(getBrokerSessionBadge({
@@ -126,5 +131,88 @@ describe('brokerSessionUtils', () => {
         expect(getBrokerSessionDegradedMessages(['selection_context_unavailable'], translate)).toEqual([
             'Selection context unavailable',
         ]);
+    });
+
+    it('returns disable reasons for unstable session identity without blocking read-only attaches', () => {
+        expect(getBrokerSessionDisabledReason({
+            attachability: 'not_attachable',
+            degradedFlags: ['unstable_session_identity'],
+        }, translate)).toBe('t:machine.brokerDegradedFlags.unstable_session_identity');
+
+        expect(getBrokerSessionDisabledReason({
+            attachability: 'attachable_with_degraded_capabilities',
+            degradedFlags: ['read_only_attach'],
+        }, translate)).toBeNull();
+    });
+
+    it('detects read-only broker sessions from discovered rows and persisted metadata', () => {
+        expect(isBrokerSessionReadOnly({
+            degradedFlags: ['read_only_attach'],
+        })).toBe(true);
+
+        expect(isBrokerSessionReadOnly({
+            brokerDegradedFlags: ['read_only_attach'],
+        })).toBe(true);
+
+        expect(isBrokerSessionReadOnly({
+            degradedFlags: [],
+            brokerDegradedFlags: [],
+            effectiveMode: 'runtime',
+            brokerEffectiveMode: 'runtime',
+        })).toBe(false);
+    });
+
+    it('builds strip summaries for runtime and storage-backed broker sessions', () => {
+        expect(getBrokerSessionStripSummary({
+            sessionSource: 'broker_attached',
+            brokerWindowOrdinal: 1,
+            brokerDesiredMode: 'runtime_preferred',
+            brokerEffectiveMode: 'runtime',
+            brokerDegradedFlags: [],
+            brokerCapabilities: ['sendUserMessage', 'interrupt', 'resolveApproval'],
+        }, translate)).toBe(
+            'Window 1 • t:sessionInfo.brokerRuntimeAttached • t:sessionInfo.brokerControlSync.interruptAndApproval',
+        );
+
+        expect(getBrokerSessionStripSummary({
+            sessionSource: 'broker_attached',
+            brokerWindowOrdinal: 2,
+            brokerDesiredMode: 'runtime_preferred',
+            brokerEffectiveMode: 'storage',
+            brokerDegradedFlags: ['read_only_attach'],
+            brokerCapabilities: ['sendUserMessage'],
+        }, translate)).toBe(
+            'Window 2 • t:sessionInfo.brokerStorageFallback',
+        );
+    });
+
+    it('summarizes grouped broker window headers', () => {
+        expect(getBrokerWindowHeaderSummary({
+            isActiveWindow: true,
+            sessions: [
+                {
+                    attachability: 'attachable',
+                    degradedFlags: [],
+                },
+                {
+                    attachability: 'attachable_with_degraded_capabilities',
+                    degradedFlags: ['read_only_attach'],
+                },
+            ],
+        }, translate)).toBe(
+            't:machine.brokerWindowHeader.activeWindow • t:machine.brokerWindowHeader.sessions:{"count":2} • t:machine.brokerWindowHeader.degraded:{"count":1}',
+        );
+
+        expect(getBrokerWindowHeaderSummary({
+            isActiveWindow: false,
+            sessions: [
+                {
+                    attachability: 'not_attachable',
+                    degradedFlags: ['unstable_session_identity'],
+                },
+            ],
+        }, translate)).toBe(
+            't:machine.brokerWindowHeader.sessions:{"count":1} • t:machine.brokerWindowHeader.unavailable',
+        );
     });
 });

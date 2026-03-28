@@ -144,17 +144,27 @@ function recordAliasKey(
   return `${providerExtensionId}|${workspaceIdentity}|${recordId}`;
 }
 
-function mergeAttachability(
-  attachability: BrokerAttachability,
-  degradedFlags: string[],
-): BrokerAttachability {
-  if (attachability === 'not_attachable') {
-    return attachability;
+function resolveSourceAttachability(params: {
+  runtime: RuntimeSessionEvidence | undefined;
+  storage: StorageSessionEvidence | undefined;
+}): BrokerAttachability {
+  if (params.runtime?.attachability) {
+    return params.runtime.attachability;
   }
 
-  return degradedFlags.length > 0
-    ? 'attachable_with_degraded_capabilities'
-    : attachability;
+  if ((params.runtime?.degradedFlags?.length ?? 0) > 0) {
+    return 'attachable_with_degraded_capabilities';
+  }
+
+  if (params.storage?.attachability) {
+    return params.storage.attachability;
+  }
+
+  if ((params.storage?.degradedFlags?.length ?? 0) > 0) {
+    return 'attachable_with_degraded_capabilities';
+  }
+
+  return 'attachable';
 }
 
 export class ProviderSessionNormalizer {
@@ -274,12 +284,10 @@ export class ProviderSessionNormalizer {
 
     const attachability = !identityStable
       ? 'not_attachable'
-      : mergeAttachability(
-          input.runtime?.attachability ??
-            mergedStorage?.attachability ??
-            'attachable',
-          degradedFlags,
-        );
+      : resolveSourceAttachability({
+          runtime: input.runtime,
+          storage: mergedStorage,
+        });
 
     return {
       provider: input.provider,

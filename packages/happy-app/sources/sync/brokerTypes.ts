@@ -54,6 +54,13 @@ export const brokerDiscoveredSessionSchema = z.object({
     attachability: brokerAttachabilitySchema,
     capabilities: z.array(z.string()),
     degradedFlags: z.array(z.string()),
+    windowInstanceId: z.string().min(1).optional(),
+    windowLabel: z.string().optional(),
+    workspaceLabel: z.string().optional(),
+    windowOrdinal: z.number().int().positive().optional(),
+    isActiveWindow: z.boolean().optional(),
+    workspacePath: z.string().nullable().optional(),
+    windowLastActiveAt: z.string().nullable().optional(),
     ...brokerRuntimeMetadataShape,
-}).strict();
+}).strip();
 export type BrokerDiscoveredSession = z.infer<typeof brokerDiscoveredSessionSchema>;

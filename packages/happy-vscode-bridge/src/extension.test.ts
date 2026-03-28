@@ -1,8 +1,41 @@
 import { describe, expect, it, vi } from 'vitest';
-import { readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { activate, deactivate } from './extension';
+
+function createRuntimeStub() {
+  return {
+    refresh: vi.fn(async () => []),
+    listDiscoveredSessions: vi.fn(() => []),
+    listProviderDiagnostics: vi.fn(() => []),
+    setSessionDesiredMode: vi.fn(async () => {
+      throw new Error('not needed');
+    }),
+    subscribe: vi.fn(() => () => {}),
+    dispose: vi.fn(async () => {}),
+  };
+}
+
+function createWindowStub() {
+  return {
+    createTreeView: vi.fn(() => ({
+      dispose: vi.fn(),
+    })),
+    createStatusBarItem: vi.fn(() => ({
+      text: '',
+      show: vi.fn(),
+      hide: vi.fn(),
+      dispose: vi.fn(),
+    })),
+  };
+}
+
+async function readJson(path: string) {
+  return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+}
 
 describe('bridge extension entrypoint', () => {
   it('declares a VS Code extension entrypoint', async () => {
@@ -92,33 +125,14 @@ describe('bridge extension entrypoint', () => {
   });
 
   it('activates the broker with a real companion runtime and ui wiring', async () => {
-    const runtime = {
-      refresh: vi.fn(async () => []),
-      listDiscoveredSessions: vi.fn(() => []),
-      listProviderDiagnostics: vi.fn(() => []),
-      setSessionDesiredMode: vi.fn(async () => {
-        throw new Error('not needed');
-      }),
-      subscribe: vi.fn(() => () => {}),
-      dispose: vi.fn(async () => {}),
-    };
+    const runtime = createRuntimeStub();
     const vscode = {
       commands: {
         registerCommand: vi.fn(() => ({
           dispose: vi.fn(),
         })),
       },
-      window: {
-        createTreeView: vi.fn(() => ({
-          dispose: vi.fn(),
-        })),
-        createStatusBarItem: vi.fn(() => ({
-          text: '',
-          show: vi.fn(),
-          hide: vi.fn(),
-          dispose: vi.fn(),
-        })),
-      },
+      window: createWindowStub(),
     };
     const context = {
       globalStorageUri: {
@@ -141,6 +155,141 @@ describe('bridge extension entrypoint', () => {
     expect(context.subscriptions.length).toBeGreaterThan(1);
 
     await deactivate();
+  });
+
+  it('writes only the compatibility alias when no real window instance id is available', async () => {
+    const runtime = createRuntimeStub();
+    const rootDir = await mkdtemp(join(tmpdir(), 'happy-vscode-bridge-'));
+    const vscode = {
+      commands: {
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      window: {
+        ...createWindowStub(),
+        state: {
+          focused: false,
+        },
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: rootDir,
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    const result = await activate(context, {
+      runtime: runtime as never,
+      token: 'test-token',
+      vscode: vscode as never,
+    });
+
+    await expect(readJson(result.manifestPath)).resolves.toMatchObject({
+      windowInstanceId: 'default-window',
+      isActiveWindow: false,
+      windowLastActiveAt: null,
+    });
+    await expect(access(join(rootDir, 'broker', 'instances'))).rejects.toBeTruthy();
+
+    await deactivate();
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  it('rewrites broker manifests when window focus changes', async () => {
+    const runtime = createRuntimeStub();
+    const rootDir = await mkdtemp(join(tmpdir(), 'happy-vscode-bridge-'));
+    let onWindowStateChange:
+      | ((state: { focused: boolean }) => void)
+      | undefined;
+    const vscode = {
+      commands: {
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      env: {
+        sessionId: 'window-a',
+      },
+      window: {
+        ...createWindowStub(),
+        state: {
+          focused: false,
+        },
+        onDidChangeWindowState: vi.fn(
+          (handler: (state: { focused: boolean }) => void) => {
+            onWindowStateChange = handler;
+            return {
+              dispose: vi.fn(),
+            };
+          },
+        ),
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: rootDir,
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    const result = await activate(context, {
+      runtime: runtime as never,
+      token: 'test-token',
+      vscode: vscode as never,
+    });
+    const perWindowPath = join(rootDir, 'broker', 'instances', 'window-a.json');
+
+    await expect(access(perWindowPath, constants.F_OK)).resolves.toBeUndefined();
+    await expect(readJson(result.manifestPath)).resolves.toMatchObject({
+      windowInstanceId: 'window-a',
+      isActiveWindow: false,
+      windowLastActiveAt: null,
+    });
+
+    vscode.window.state.focused = true;
+    onWindowStateChange?.({ focused: true });
+
+    let lastActiveAt: string | null = null;
+    await vi.waitFor(async () => {
+      const aliasManifest = await readJson(result.manifestPath);
+      const perWindowManifest = await readJson(perWindowPath);
+
+      expect(aliasManifest).toMatchObject({
+        windowInstanceId: 'window-a',
+        isActiveWindow: true,
+      });
+      expect(perWindowManifest).toMatchObject({
+        windowInstanceId: 'window-a',
+        isActiveWindow: true,
+      });
+      expect(typeof aliasManifest.windowLastActiveAt).toBe('string');
+      expect(typeof perWindowManifest.windowLastActiveAt).toBe('string');
+      lastActiveAt = aliasManifest.windowLastActiveAt as string;
+    });
+
+    vscode.window.state.focused = false;
+    onWindowStateChange?.({ focused: false });
+
+    await vi.waitFor(async () => {
+      const aliasManifest = await readJson(result.manifestPath);
+      const perWindowManifest = await readJson(perWindowPath);
+
+      expect(aliasManifest).toMatchObject({
+        windowInstanceId: 'window-a',
+        isActiveWindow: false,
+        windowLastActiveAt: lastActiveAt,
+      });
+      expect(perWindowManifest).toMatchObject({
+        windowInstanceId: 'window-a',
+        isActiveWindow: false,
+        windowLastActiveAt: lastActiveAt,
+      });
+    });
+
+    await deactivate();
+    await rm(rootDir, { recursive: true, force: true });
   });
 
   it('wires default probe factories into runtime creation', async () => {

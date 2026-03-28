@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -40,6 +41,17 @@ function makeRuntimeMetadata() {
       runtime: 'ready' as const,
       storage: 'ready' as const,
     },
+  };
+}
+
+function makeManifestWindowMetadata() {
+  return {
+    windowInstanceId: 'window-a',
+    windowLabel: 'Window A',
+    workspaceLabel: 'Workspace A',
+    workspacePath: '/workspace-a',
+    isActiveWindow: true,
+    windowLastActiveAt: '2026-03-26T00:00:00.000Z',
   };
 }
 
@@ -142,6 +154,7 @@ describe('BrokerServer', () => {
       },
       manifestStore: new BrokerManifestStore(dir),
       store,
+      manifestWindowMetadata: makeManifestWindowMetadata(),
       token: 'test-token',
     });
 
@@ -175,6 +188,7 @@ describe('BrokerServer', () => {
       },
       manifestStore: new BrokerManifestStore(dir),
       store,
+      manifestWindowMetadata: makeManifestWindowMetadata(),
       token: 'test-token',
     });
 
@@ -201,6 +215,7 @@ describe('BrokerServer', () => {
       },
       manifestStore: new BrokerManifestStore(dir),
       store,
+      manifestWindowMetadata: makeManifestWindowMetadata(),
       token: 'test-token',
     });
 
@@ -228,6 +243,57 @@ describe('BrokerServer', () => {
           seq: 1,
           event: {
             type: 'session.snapshot',
+          },
+        },
+      },
+    });
+
+    client.close();
+    await server.stop();
+  });
+
+  it('replays events buffered while subscribeEvents is establishing the runtime watch', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'happy-vscode-broker-'));
+    tempDirs.push(dir);
+
+    const store = new SharedSessionStore();
+    const server = await BrokerServer.start({
+      adapterHost: {
+        discover: async () => [],
+        attach: async () => null,
+        subscribeEvents: async () => {
+          store.append('broker-sess-1', {
+            type: 'session.message.delta',
+            brokerSessionId: 'broker-sess-1',
+            payload: {
+              role: 'assistant',
+              text: 'buffered during subscribe',
+            },
+          });
+          return true;
+        },
+      },
+      manifestStore: new BrokerManifestStore(dir),
+      store,
+      manifestWindowMetadata: makeManifestWindowMetadata(),
+      token: 'test-token',
+    });
+
+    const client = await createRpcClient(server.url);
+
+    await client.call('subscribeEvents', { brokerSessionId: 'broker-sess-1' });
+
+    await expect(client.nextNotification()).resolves.toMatchObject({
+      method: 'brokerEvent',
+      params: {
+        brokerSessionId: 'broker-sess-1',
+        entry: {
+          event: {
+            type: 'session.message.delta',
+            payload: {
+              role: 'assistant',
+              text: 'buffered during subscribe',
+            },
           },
         },
       },
@@ -278,6 +344,7 @@ describe('BrokerServer', () => {
       },
       manifestStore: new BrokerManifestStore(dir),
       store: new SharedSessionStore(),
+      manifestWindowMetadata: makeManifestWindowMetadata(),
       token: 'test-token',
     });
 
@@ -310,4 +377,90 @@ describe('BrokerServer', () => {
     client.close();
     await server.stop();
   });
+
+  it('writes the full window manifest during startup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'happy-vscode-broker-'));
+    tempDirs.push(dir);
+    const manifestStore = new BrokerManifestStore(dir);
+    const windowMetadata = makeManifestWindowMetadata();
+    const server = await BrokerServer.start({
+      adapterHost: {
+        discover: async () => [],
+        attach: async () => null,
+      },
+      manifestStore,
+      store: new SharedSessionStore(),
+      manifestWindowMetadata: windowMetadata,
+      token: 'test-token',
+    });
+
+    await expect(manifestStore.read()).resolves.toMatchObject({
+      port: server.port,
+      token: 'test-token',
+      ...windowMetadata,
+    });
+
+    await server.stop();
+  });
+
+  it('closes listening resources when manifest publish fails during startup', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'happy-vscode-broker-'));
+    tempDirs.push(dir);
+    const manifestStore = new BrokerManifestStore(dir);
+    vi.spyOn(manifestStore, 'write').mockRejectedValue(new Error('publish failed'));
+    const port = await reservePort();
+
+    await expect(
+      BrokerServer.start({
+        adapterHost: {
+          discover: async () => [],
+          attach: async () => null,
+        },
+        manifestStore,
+        store: new SharedSessionStore(),
+        manifestWindowMetadata: makeManifestWindowMetadata(),
+        token: 'test-token',
+        port,
+      }),
+    ).rejects.toThrow('publish failed');
+
+    await expect(listenOnce(port)).resolves.toBeUndefined();
+  });
 });
+
+async function reservePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+  return port;
+}
+
+async function listenOnce(port: number): Promise<void> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve());
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}

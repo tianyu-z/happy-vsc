@@ -94,8 +94,16 @@ describe('createSessionMetadata broker projection', () => {
         runtime: 'ready',
         storage: 'ready',
       },
+      windowInstanceId: 'window-a',
+      brokerWindowLabel: 'Window A',
+      brokerWorkspaceLabel: 'Workspace A',
+      brokerWorkspacePath: '/workspace-a',
+      brokerWindowOrdinal: 1,
+      brokerWindowIsActive: true,
+      brokerWindowLastActiveAt: '2026-03-26T15:00:00.000Z',
     });
 
+    expect(metadata.path).toBe('/workspace-a');
     expect(metadata.sessionSource).toBe('broker_attached');
     expect(metadata.brokerSessionId).toBe('broker-sess-1');
     expect(metadata.brokerCapabilities).toEqual(['sendUserMessage']);
@@ -103,6 +111,27 @@ describe('createSessionMetadata broker projection', () => {
     expect(metadata.brokerDesiredMode).toBe('runtime_preferred');
     expect(metadata.brokerEffectiveMode).toBe('runtime');
     expect(metadata.brokerModeReason).toBe('runtime_ready');
+    expect(metadata.windowInstanceId).toBe('window-a');
+    expect(metadata.brokerWindowLabel).toBe('Window A');
+    expect(metadata.brokerWorkspaceLabel).toBe('Workspace A');
+    expect(metadata.brokerWorkspacePath).toBe('/workspace-a');
+    expect(metadata.brokerWindowOrdinal).toBe(1);
+    expect(metadata.brokerWindowIsActive).toBe(true);
+    expect(metadata.brokerWindowLastActiveAt).toBe('2026-03-26T15:00:00.000Z');
+  });
+
+  it('fails fast when broker-attached metadata is missing required window fields', () => {
+    expect(() =>
+      createSessionMetadata({
+        flavor: 'claude',
+        machineId: 'machine-1',
+        startedBy: 'terminal',
+        source: 'broker_attached',
+        brokerSessionId: 'broker-sess-1',
+      }),
+    ).toThrow(
+      'Missing broker-attached metadata fields: windowInstanceId, brokerWindowLabel, brokerWorkspaceLabel, brokerWorkspacePath, brokerWindowOrdinal',
+    );
   });
 });
 
@@ -128,6 +157,13 @@ describe('runBrokerAttachedSession', () => {
       machineId: 'machine-1',
       startedBy: 'terminal',
       brokerSessionId: 'broker-sess-1',
+      brokerWindowInstanceId: 'window-a',
+      brokerWindowLabel: 'Window A',
+      brokerWorkspaceLabel: 'Workspace A',
+      brokerWorkspacePath: '/workspace-a',
+      brokerWindowOrdinal: 1,
+      brokerWindowIsActive: true,
+      brokerWindowLastActiveAt: '2026-03-26T15:00:00.000Z',
       brokerClient: { discoverSessions, attachSession } as any,
       notifyDaemonSessionStarted,
     });
@@ -143,6 +179,13 @@ describe('runBrokerAttachedSession', () => {
         brokerSessionId: 'broker-sess-1',
         brokerUrl: 'ws://broker.test',
         machineId: 'machine-1',
+        brokerWindowInstanceId: 'window-a',
+        brokerWindowLabel: 'Window A',
+        brokerWorkspaceLabel: 'Workspace A',
+        brokerWorkspacePath: '/workspace-a',
+        brokerWindowOrdinal: 1,
+        brokerWindowIsActive: true,
+        brokerWindowLastActiveAt: '2026-03-26T15:00:00.000Z',
         notifyDaemonSessionStarted,
         startedBy: 'terminal',
       }),
@@ -174,6 +217,11 @@ describe('runBrokerAttachedSession', () => {
       brokerRootDir: '/tmp/workspace',
       brokerSessionId: 'broker-sess-1',
       machineId: 'machine-1',
+      brokerWindowInstanceId: 'window-a',
+      brokerWindowLabel: 'Window A',
+      brokerWorkspaceLabel: 'Workspace A',
+      brokerWorkspacePath: '/workspace-a',
+      brokerWindowOrdinal: 1,
     });
 
     expect(mockLoadBrokerManifest).toHaveBeenCalledWith('/tmp/workspace');
@@ -182,6 +230,11 @@ describe('runBrokerAttachedSession', () => {
         brokerClient,
         brokerSessionId: 'broker-sess-1',
         brokerUrl: 'ws://broker.from.manifest',
+        brokerWindowInstanceId: 'window-a',
+        brokerWindowLabel: 'Window A',
+        brokerWorkspaceLabel: 'Workspace A',
+        brokerWorkspacePath: '/workspace-a',
+        brokerWindowOrdinal: 1,
       }),
     );
   });

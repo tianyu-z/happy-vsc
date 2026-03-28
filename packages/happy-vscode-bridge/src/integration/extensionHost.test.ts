@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 type SmokeResult = {
   started: boolean;
@@ -72,10 +72,44 @@ async function runSmoke() {
   const manifest = JSON.parse(await readFile(result.manifestPath, 'utf8')) as {
     port?: number;
     token?: string;
+    windowInstanceId?: string;
+    windowLabel?: string;
+    workspaceLabel?: string;
   };
 
   assert.equal(manifest.port, result.port);
   assert.ok(typeof manifest.token === 'string' && manifest.token.length > 0);
+  assert.ok(
+    typeof manifest.windowInstanceId === 'string' &&
+      manifest.windowInstanceId.length > 0,
+    'manifest.windowInstanceId must be a non-empty string',
+  );
+  assert.ok(
+    typeof manifest.windowLabel === 'string' && manifest.windowLabel.length > 0,
+    'manifest.windowLabel must be a non-empty string',
+  );
+  assert.ok(
+    typeof manifest.workspaceLabel === 'string' &&
+      manifest.workspaceLabel.length > 0,
+    'manifest.workspaceLabel must be a non-empty string',
+  );
+  if (manifest.windowInstanceId !== 'default-window') {
+    const perWindowManifestPath = join(
+      dirname(result.manifestPath),
+      'instances',
+      `${manifest.windowInstanceId}.json`,
+    );
+    const perWindowManifest = JSON.parse(
+      await readFile(perWindowManifestPath, 'utf8'),
+    ) as {
+      windowInstanceId?: string;
+      windowLabel?: string;
+      workspaceLabel?: string;
+    };
+    assert.equal(perWindowManifest.windowInstanceId, manifest.windowInstanceId);
+    assert.equal(perWindowManifest.windowLabel, manifest.windowLabel);
+    assert.equal(perWindowManifest.workspaceLabel, manifest.workspaceLabel);
+  }
   assert.ok(
     result.commands.includes('happyVscodeBridge.switchSessionMode'),
     'mode switch command was not registered',
@@ -91,6 +125,9 @@ async function runSmoke() {
           port: result.port,
           manifestPath: result.manifestPath,
           commands: result.commands,
+          windowInstanceId: manifest.windowInstanceId,
+          windowLabel: manifest.windowLabel,
+          workspaceLabel: manifest.workspaceLabel,
         },
         null,
         2,

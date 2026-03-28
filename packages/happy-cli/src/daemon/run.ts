@@ -17,6 +17,7 @@ import { writeDaemonState, DaemonLocallyPersistedState, readDaemonState, acquire
 
 import { cleanupDaemonState, isDaemonRunningCurrentlyInstalledHappyVersion, stopDaemon } from './controlClient';
 import { startDaemonControlServer } from './controlServer';
+import { buildBrokerAttachArgs } from './brokerAttachArgs';
 import { findReusableBrokerSession } from './brokerSessionReuse';
 import { buildSpawnEnvironment, waitForSessionWebhook } from './sessionStartup';
 import { readFileSync } from 'fs';
@@ -659,18 +660,19 @@ export async function startDaemon(): Promise<void> {
           };
         }
 
-        const brokerAttachArgs = [
-          'broker-attached-session',
-          '--started-by', 'daemon',
-          '--broker-session-id', options.brokerSessionId,
-        ];
-
-        if (options.brokerRootDir) {
-          brokerAttachArgs.push('--broker-root-dir', options.brokerRootDir);
-        }
-        if (options.brokerUrl) {
-          brokerAttachArgs.push('--broker-url', options.brokerUrl);
-        }
+        const brokerAttachArgs = buildBrokerAttachArgs({
+          startedBy: 'daemon',
+          brokerSessionId: options.brokerSessionId,
+          brokerRootDir: options.brokerRootDir,
+          brokerUrl: options.brokerUrl,
+          windowInstanceId: options.brokerWindowInstanceId,
+          brokerWindowLabel: options.brokerWindowLabel,
+          brokerWorkspaceLabel: options.brokerWorkspaceLabel,
+          brokerWorkspacePath: options.brokerWorkspacePath,
+          brokerWindowOrdinal: options.brokerWindowOrdinal,
+          brokerWindowIsActive: options.brokerWindowIsActive,
+          brokerWindowLastActiveAt: options.brokerWindowLastActiveAt,
+        });
 
         const brokerExtraEnv = await resolveBrokerAttachEnv();
 

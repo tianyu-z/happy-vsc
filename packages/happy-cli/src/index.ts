@@ -119,6 +119,13 @@ async function spawnAndWaitForDaemon(): Promise<boolean> {
       let brokerRootDir: string | undefined = undefined;
       let brokerUrl: string | undefined = undefined;
       let brokerSessionId: string | undefined = undefined;
+      let brokerWindowInstanceId: string | undefined = undefined;
+      let brokerWindowLabel: string | undefined = undefined;
+      let brokerWorkspaceLabel: string | undefined = undefined;
+      let brokerWorkspacePath: string | undefined = undefined;
+      let brokerWindowOrdinal: number | undefined = undefined;
+      let brokerWindowIsActive: boolean | undefined = undefined;
+      let brokerWindowLastActiveAt: string | undefined = undefined;
 
       for (let i = 1; i < args.length; i++) {
         if (args[i] === '--started-by') {
@@ -135,6 +142,39 @@ async function spawnAndWaitForDaemon(): Promise<boolean> {
         }
         if (args[i] === '--broker-session-id') {
           brokerSessionId = args[++i];
+          continue;
+        }
+        if (args[i] === '--window-instance-id') {
+          brokerWindowInstanceId = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-window-label') {
+          brokerWindowLabel = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-workspace-label') {
+          brokerWorkspaceLabel = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-workspace-path') {
+          brokerWorkspacePath = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-window-ordinal') {
+          const parsedOrdinal = Number(args[++i]);
+          brokerWindowOrdinal = Number.isFinite(parsedOrdinal)
+            ? parsedOrdinal
+            : undefined;
+          continue;
+        }
+        if (args[i] === '--broker-window-is-active') {
+          const value = args[++i];
+          brokerWindowIsActive =
+            value === 'true' ? true : value === 'false' ? false : undefined;
+          continue;
+        }
+        if (args[i] === '--broker-window-last-active-at') {
+          brokerWindowLastActiveAt = args[++i];
           continue;
         }
       }
@@ -165,6 +205,13 @@ async function spawnAndWaitForDaemon(): Promise<boolean> {
         brokerRootDir,
         brokerUrl,
         brokerSessionId,
+        brokerWindowInstanceId,
+        brokerWindowLabel,
+        brokerWorkspaceLabel,
+        brokerWorkspacePath,
+        brokerWindowOrdinal,
+        brokerWindowIsActive,
+        brokerWindowLastActiveAt,
       });
     } catch (error) {
       console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error');

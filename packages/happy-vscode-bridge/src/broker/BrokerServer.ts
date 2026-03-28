@@ -11,7 +11,10 @@ import type {
   BridgeBrokerSnapshot,
 } from '../runtime/types';
 
-import type { BrokerManifestStore } from './BrokerManifestStore';
+import type {
+  BrokerInstanceManifest,
+  BrokerManifestStore,
+} from './BrokerManifestStore';
 import {
   createBrokerRpcError,
   createBrokerRpcNotification,
@@ -54,6 +57,12 @@ export type BrokerServerOptions = {
   adapterHost: BrokerAdapterHost;
   manifestStore: BrokerManifestStore;
   store: SharedSessionStore;
+  manifestWindowMetadata: Pick<
+    BrokerInstanceManifest,
+    'windowLabel' | 'workspaceLabel' | 'workspacePath' | 'isActiveWindow' | 'windowLastActiveAt'
+  > & {
+    windowInstanceId?: string;
+  };
   host?: string;
   port?: number;
   token?: string;
@@ -245,9 +254,11 @@ export class BrokerServer {
             if (!brokerSessionId) {
               throw new Error('subscribeEvents requires brokerSessionId');
             }
-            await options.adapterHost.subscribeEvents?.(brokerSessionId);
-            const unsubscribe = options.store.subscribe((entry: BrokerLogEntry) => {
-              if (entry.sessionId !== brokerSessionId || socket.readyState !== WebSocket.OPEN) {
+            const sendEntry = (entry: BrokerLogEntry) => {
+              if (
+                entry.sessionId !== brokerSessionId ||
+                socket.readyState !== WebSocket.OPEN
+              ) {
                 return;
               }
 
@@ -259,10 +270,44 @@ export class BrokerServer {
                   }),
                 ),
               );
+            };
+
+            const bufferedEntries: BrokerLogEntry[] = [];
+            let handshakeComplete = false;
+            const unsubscribe = options.store.subscribe((entry: BrokerLogEntry) => {
+              if (entry.sessionId !== brokerSessionId) {
+                return;
+              }
+
+              if (!handshakeComplete) {
+                bufferedEntries.push(entry);
+                return;
+              }
+
+              sendEntry(entry);
             });
 
-            socketSubscriptions.get(socket)?.push(unsubscribe);
+            const socketUnsubscribers = socketSubscriptions.get(socket);
+            socketUnsubscribers?.push(unsubscribe);
+
+            try {
+              await options.adapterHost.subscribeEvents?.(brokerSessionId);
+            } catch (error) {
+              unsubscribe();
+              if (socketUnsubscribers) {
+                const index = socketUnsubscribers.indexOf(unsubscribe);
+                if (index >= 0) {
+                  socketUnsubscribers.splice(index, 1);
+                }
+              }
+              throw error;
+            }
+
+            handshakeComplete = true;
             socket.send(JSON.stringify(createBrokerRpcSuccess(message.id, true)));
+            for (const entry of bufferedEntries) {
+              sendEntry(entry);
+            }
             return;
           }
 
@@ -291,7 +336,16 @@ export class BrokerServer {
     const port = typeof address === 'object' && address ? address.port : 0;
     const url = `ws://${host}:${port}?token=${token}`;
 
-    await options.manifestStore.write({ port, token });
+    try {
+      await options.manifestStore.write({
+        port,
+        token,
+        ...options.manifestWindowMetadata,
+      });
+    } catch (error) {
+      await closeServerResources(httpServer, socketServer);
+      throw error;
+    }
 
     return new BrokerServer(httpServer, socketServer, port, token, url);
   }
@@ -309,4 +363,21 @@ export class BrokerServer {
       this.httpServer.close(() => resolve());
     });
   }
+}
+
+async function closeServerResources(
+  httpServer: HttpServer,
+  socketServer: WebSocketServer,
+): Promise<void> {
+  for (const socket of socketServer.clients) {
+    socket.close();
+  }
+
+  await new Promise<void>((resolve) => {
+    socketServer.close(() => resolve());
+  });
+
+  await new Promise<void>((resolve) => {
+    httpServer.close(() => resolve());
+  });
 }

@@ -253,6 +253,8 @@ export async function machineSpawnNewSession(options: SpawnSessionOptions): Prom
 export async function machineListBrokerSessions(
     machineId: string,
 ): Promise<{ sessions: BrokerDiscoveredSession[] }> {
+    await apiSocket.waitUntilConnected();
+
     const result = await apiSocket.machineRPC<{
         sessions?: unknown;
         error?: string;
@@ -286,10 +288,12 @@ export async function machineAttachBrokerSession(
     brokerSessionId: string,
 ): Promise<SpawnSessionResult> {
     try {
-        return await apiSocket.machineRPC<SpawnSessionResult, { brokerSessionId: string }>(
+        return await apiSocket.machineSpawnHTTP<SpawnSessionResult>(
             machineId,
-            'broker-attach-session',
-            { brokerSessionId },
+            {
+                type: 'broker-attach-session',
+                brokerSessionId,
+            },
         );
     } catch (error) {
         return {

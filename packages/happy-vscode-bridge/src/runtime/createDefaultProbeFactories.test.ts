@@ -8,6 +8,10 @@ import { createProviderRuntimeCaptureRegistry } from './ProviderRuntimeCapture';
 import type { ProviderRuntimeCaptureRegistry } from './ProviderRuntimeCapture';
 import type { ProviderHostResolution } from './probes/types';
 
+function toFileUri(path: string): string {
+  return `file://${path}`;
+}
+
 function makeResolution(
   provider: ProviderHostResolution['provider'],
   commands: string[] = [],
@@ -739,6 +743,198 @@ describe('createDefaultProbeFactories', () => {
     );
   });
 
+  it('prefers the captured Codex thread follower bridge over chat commands when sending into an existing session', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'codex-runtime-captured-view-thread-follower-send',
+    });
+    const codexConversationId = '019d19f6-20f7-7802-a890-8c29bbfb4f15';
+    const executeCommand = vi.fn(async () => undefined);
+    const navigateToRoute = vi.fn();
+    const handleThreadFollowerStartTurnRequest = vi.fn(async () => undefined);
+    const sidebarWebview = {
+      postMessage: vi.fn(),
+    };
+    const registry = createProviderRuntimeCaptureRegistry();
+
+    registry.captureRegistration('chatgpt.sidebarView', {
+      sidebarView: {
+        webview: sidebarWebview,
+      },
+      navigateToRoute,
+      postMessageToWebview: vi.fn(),
+      handleThreadFollowerStartTurnRequest,
+    });
+    registry.captureChatSessionRegistration('openai-codex', {
+      provideChatSessionItems: vi.fn(async () => [
+        {
+          id: codexConversationId,
+          label: 'Captured Codex Session',
+          resource: {
+            scheme: 'openai-codex',
+            authority: 'route',
+            path: `/local/${codexConversationId}`,
+            fsPath: `/local/${codexConversationId}`,
+          },
+        },
+      ]),
+    });
+
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: executeCommand,
+      createUri: (value) => ({ value }),
+      providerCaptures: registry,
+    });
+
+    const probes = await factories.codex!(
+      makeResolution('codex', [
+        'vscode.openWith',
+        'type',
+        'workbench.action.chat.focusInput',
+        'workbench.action.chat.submit',
+        'workbench.action.chat.cancel',
+      ]),
+    );
+
+    const [session] = await probes.runtimeProbe!.discoverSessions();
+
+    await probes.runtimeProbe!.sendMessage?.(
+      session.providerSessionRef,
+      'ship the patch',
+    );
+
+    expect(navigateToRoute).toHaveBeenCalledWith(
+      `/local/${codexConversationId}`,
+      undefined,
+    );
+    expect(handleThreadFollowerStartTurnRequest).toHaveBeenCalledTimes(1);
+    expect(handleThreadFollowerStartTurnRequest).toHaveBeenCalledWith(
+      sidebarWebview,
+      expect.any(String),
+      {
+        conversationId: codexConversationId,
+        turnStartParams: expect.objectContaining({
+          input: [
+            {
+              type: 'text',
+              text: 'ship the patch',
+              text_elements: [],
+            },
+          ],
+          cwd: null,
+          model: null,
+          effort: null,
+          collaborationMode: null,
+        }),
+      },
+    );
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('prefers captured Codex view routing over vscode.openWith when sending into an existing session', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'codex-runtime-captured-view-send',
+    });
+    const codexConversationId = '019d19f6-20f7-7802-a890-8c29bbfb4f15';
+    const executeCommand = vi.fn(async () => undefined);
+    const navigateToRoute = vi.fn();
+    const registry = createProviderRuntimeCaptureRegistry();
+
+    registry.captureRegistration('chatgpt.sidebarView', {
+      sidebarView: {
+        webview: {
+          postMessage: vi.fn(),
+        },
+      },
+      navigateToRoute,
+      postMessageToWebview: vi.fn(),
+    });
+    registry.captureChatSessionRegistration('openai-codex', {
+      provideChatSessionItems: vi.fn(async () => [
+        {
+          id: codexConversationId,
+          label: 'Captured Codex Session',
+          resource: {
+            scheme: 'openai-codex',
+            authority: 'route',
+            path: `/local/${codexConversationId}`,
+            fsPath: `/local/${codexConversationId}`,
+          },
+        },
+      ]),
+    });
+
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: executeCommand,
+      createUri: (value) => ({ value }),
+      providerCaptures: registry,
+    });
+
+    const probes = await factories.codex!(
+      makeResolution('codex', [
+        'vscode.openWith',
+        'type',
+        'workbench.action.chat.focusInput',
+        'workbench.action.chat.submit',
+        'workbench.action.chat.cancel',
+      ]),
+    );
+
+    const [session] = await probes.runtimeProbe!.discoverSessions();
+
+    await probes.runtimeProbe!.sendMessage?.(
+      session.providerSessionRef,
+      'ship the patch',
+    );
+    await probes.runtimeProbe!.interrupt?.(
+      session.providerSessionRef,
+      'user_cancelled',
+    );
+
+    expect(navigateToRoute).toHaveBeenNthCalledWith(
+      1,
+      `/local/${codexConversationId}`,
+      undefined,
+    );
+    expect(navigateToRoute).toHaveBeenNthCalledWith(
+      2,
+      `/local/${codexConversationId}`,
+      undefined,
+    );
+    expect(executeCommand).toHaveBeenNthCalledWith(
+      1,
+      'workbench.action.chat.focusInput',
+    );
+    expect(executeCommand).toHaveBeenNthCalledWith(2, 'type', {
+      text: 'ship the patch',
+    });
+    expect(executeCommand).toHaveBeenNthCalledWith(
+      3,
+      'workbench.action.chat.submit',
+    );
+    expect(executeCommand).toHaveBeenNthCalledWith(
+      4,
+      'workbench.action.chat.focusInput',
+    );
+    expect(executeCommand).toHaveBeenNthCalledWith(
+      5,
+      'workbench.action.chat.cancel',
+    );
+    expect(executeCommand).not.toHaveBeenCalledWith(
+      'vscode.openWith',
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it('creates a Codex runtime probe without event stream degradation when log watching is available', async () => {
     const fixture = await writeLogFixture({
       rootName: 'codex-runtime-watch',
@@ -836,6 +1032,68 @@ describe('createDefaultProbeFactories', () => {
         },
       },
     ]);
+  });
+
+  it('prefers the captured Claude live channel transport over primaryEditor.open when sending into an active session', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'claude-runtime-live-channel-send',
+      claudeLog: `
+2026-03-24 07:07:40.100 [info] Received message from webview: {"type":"launch_claude","channelId":"live-channel-42","cwd":"/home/work","resume":"98774e08-0c03-4d72-89cb-6a29ba6ae93a","model":"opus[1m]","permissionMode":"default","thinkingLevel":"default_on"}
+2026-03-24 07:07:40.907 [info] Received message from webview: {"type":"request","requestId":"9jdfq0fpn4u","request":{"type":"update_session_state","sessionId":"98774e08-0c03-4d72-89cb-6a29ba6ae93a","state":"running","title":"Test setup and configuration"}}
+      `.trim(),
+    });
+    const executeCommand = vi.fn(async () => undefined);
+    const transportMessage = vi.fn(async () => undefined);
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: executeCommand,
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'claude'
+            ? {
+                allComms: new Set([
+                  {
+                    channels: new Map([
+                      ['live-channel-42', {}],
+                    ]),
+                    transportMessage,
+                  },
+                ]),
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      },
+    });
+
+    const probes = await factories.claude!(
+      makeResolution('claude', ['claude-vscode.primaryEditor.open']),
+    );
+    const [session] = await probes.runtimeProbe!.discoverSessions();
+
+    await probes.runtimeProbe!.sendMessage?.(
+      session.providerSessionRef,
+      'continue from the current context',
+    );
+
+    expect(transportMessage).toHaveBeenCalledTimes(1);
+    expect(transportMessage).toHaveBeenCalledWith(
+      'live-channel-42',
+      {
+        type: 'user',
+        uuid: expect.any(String),
+        session_id: '',
+        parent_tool_use_id: null,
+        message: {
+          role: 'user',
+          content: 'continue from the current context',
+        },
+      },
+      false,
+    );
+    expect(executeCommand).not.toHaveBeenCalled();
   });
 
   it('creates a Claude runtime probe that routes prompts into an existing session', async () => {
@@ -1117,5 +1375,226 @@ describe('createDefaultProbeFactories', () => {
         },
       },
     ]);
+  });
+
+  it('watches Claude message deltas from the native session file', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'claude-watch-session-file',
+      claudeLog: `
+2026-03-24 07:07:40.907 [info] Received message from webview: {"type":"request","requestId":"9jdfq0fpn4u","request":{"type":"update_session_state","sessionId":"98774e08-0c03-4d72-89cb-6a29ba6ae93a","state":"running","title":"Test setup and configuration"}}
+      `.trim(),
+    });
+    const workspaceDir = join(
+      tmpdir(),
+      'happy-vscode-bridge-workspaces',
+      'claude-watch-session-file',
+    );
+    const claudeConfigDir = join(tmpdir(), 'happy-vscode-bridge-claude-config');
+    const projectDir = join(
+      claudeConfigDir,
+      'projects',
+      workspaceDir.replace(/[^a-zA-Z0-9-]/g, '-'),
+    );
+    const sessionFilePath = join(
+      projectDir,
+      '98774e08-0c03-4d72-89cb-6a29ba6ae93a.jsonl',
+    );
+    await mkdir(projectDir, { recursive: true });
+    await writeFile(
+      sessionFilePath,
+      `${JSON.stringify({
+        type: 'user',
+        uuid: 'existing-user',
+        message: { role: 'user', content: 'existing question' },
+      })}\n`,
+      'utf8',
+    );
+
+    vi.stubEnv('CLAUDE_CONFIG_DIR', claudeConfigDir);
+    try {
+      const factories = createDefaultProbeFactories({
+        extensionLogPath: fixture.logPath,
+        workspace: {
+          folderUris: [toFileUri(workspaceDir)],
+        },
+        commandExecutor: vi.fn(async () => undefined),
+        watchPollMs: 10,
+      });
+
+      const probes = await factories.claude!(
+        makeResolution('claude', ['claude-vscode.primaryEditor.open']),
+      );
+      const [session] = await probes.runtimeProbe!.discoverSessions();
+      const events: Array<{ type: string; payload?: unknown }> = [];
+
+      const cleanup = await probes.runtimeProbe!.watchSession(
+        session.providerSessionRef,
+        (event) => {
+          events.push(event);
+        },
+      );
+
+      await appendFile(
+        sessionFilePath,
+        [
+          JSON.stringify({
+            type: 'user',
+            uuid: 'new-user',
+            message: { role: 'user', content: 'who trained you?' },
+          }),
+          JSON.stringify({
+            type: 'assistant',
+            uuid: 'new-assistant',
+            message: {
+              content: [
+                { type: 'text', text: 'I was trained by OpenAI.' },
+              ],
+            },
+          }),
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (events.length >= 2) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      await cleanup();
+
+      expect(events).toEqual([
+        {
+          type: 'session.message.delta',
+          payload: {
+            role: 'user',
+            text: 'who trained you?',
+          },
+        },
+        {
+          type: 'session.message.delta',
+          payload: {
+            role: 'assistant',
+            text: 'I was trained by OpenAI.',
+          },
+        },
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('watches Codex message deltas from the native session file', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'codex-watch-session-file',
+      codexLog: `
+2026-03-24 07:06:53.694 [warning] [CodexMcpConnection] cli: message="codex_app_server::codex_message_processor: thread/resume overrides ignored for running thread 019d19f6-20f7-7802-a890-8c29bbfb4f15: config overrides were provided and ignored while running"
+      `.trim(),
+    });
+    const codexHomeDir = join(tmpdir(), 'happy-vscode-bridge-codex-home');
+    const sessionDir = join(codexHomeDir, 'sessions', '2026', '03', '24');
+    const sessionFilePath = join(
+      sessionDir,
+      'rollout-20260324-019d19f6-20f7-7802-a890-8c29bbfb4f15.jsonl',
+    );
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      sessionFilePath,
+      `${JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-03-24T07:06:53.694Z',
+        payload: {
+          role: 'user',
+          content: [{ type: 'input_text', text: 'existing prompt' }],
+        },
+      })}\n`,
+      'utf8',
+    );
+
+    vi.stubEnv('CODEX_HOME', codexHomeDir);
+    try {
+      const factories = createDefaultProbeFactories({
+        extensionLogPath: fixture.logPath,
+        workspace: {
+          folderUris: [toFileUri(join(tmpdir(), 'codex-workspace'))],
+        },
+        commandExecutor: vi.fn(async () => undefined),
+        createUri: (value) => ({ value }),
+        watchPollMs: 10,
+      });
+
+      const probes = await factories.codex!(
+        makeResolution('codex', [
+          'vscode.openWith',
+          'type',
+          'workbench.action.chat.focusInput',
+          'workbench.action.chat.submit',
+          'workbench.action.chat.cancel',
+        ]),
+      );
+      const [session] = await probes.runtimeProbe!.discoverSessions();
+      const events: Array<{ type: string; payload?: unknown }> = [];
+
+      const cleanup = await probes.runtimeProbe!.watchSession(
+        session.providerSessionRef,
+        (event) => {
+          events.push(event);
+        },
+      );
+
+      await appendFile(
+        sessionFilePath,
+        [
+          JSON.stringify({
+            type: 'response_item',
+            timestamp: '2026-03-24T07:07:00.000Z',
+            payload: {
+              role: 'user',
+              content: [{ type: 'input_text', text: 'new prompt' }],
+            },
+          }),
+          JSON.stringify({
+            type: 'response_item',
+            timestamp: '2026-03-24T07:07:01.000Z',
+            payload: {
+              role: 'assistant',
+              content: [{ type: 'output_text', text: 'new answer' }],
+            },
+          }),
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (events.length >= 2) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      await cleanup();
+
+      expect(events).toEqual([
+        {
+          type: 'session.message.delta',
+          payload: {
+            role: 'user',
+            text: 'new prompt',
+          },
+        },
+        {
+          type: 'session.message.delta',
+          payload: {
+            role: 'assistant',
+            text: 'new answer',
+          },
+        },
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

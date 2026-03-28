@@ -1,5 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { readdir, readFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { BrokerProvider } from 'happy-wire';
 
@@ -100,6 +103,43 @@ type CodexCapturedViewProvider = {
   editorPanels?: Iterable<unknown> | {
     entries?(): Iterable<unknown>;
   };
+  sidebarView?: {
+    webview?: unknown;
+  } | null;
+  focusedView?: {
+    kind?: string;
+    panel?: unknown;
+  } | null;
+  postMessageToWebview?: (webview: unknown, message: unknown) => unknown;
+  navigateToRoute?: (path: string, state?: unknown) => unknown;
+  handleThreadFollowerStartTurnRequest?: (
+    webview: unknown,
+    requestId: string,
+    params: CodexThreadFollowerStartTurnRequest,
+  ) => Promise<unknown> | unknown;
+};
+
+type CodexThreadFollowerTextInput = {
+  type: 'text';
+  text: string;
+  text_elements: unknown[];
+};
+
+type CodexThreadFollowerTurnStartParams = {
+  input: CodexThreadFollowerTextInput[];
+  cwd: string | null;
+  approvalPolicy?: string | null;
+  approvalsReviewer?: string | null;
+  sandboxPolicy?: unknown;
+  attachments?: unknown[];
+  model: string | null;
+  effort: string | null;
+  collaborationMode: string | null;
+};
+
+type CodexThreadFollowerStartTurnRequest = {
+  conversationId: string;
+  turnStartParams: CodexThreadFollowerTurnStartParams;
 };
 
 const exthostDirPattern = /^exthost\d+$/;
@@ -128,6 +168,11 @@ const codexRuntimeSendCommandIds = [
   codexFocusInputCommandId,
   codexSubmitCommandId,
 ] as const;
+const claudeInternalSessionEventTypes = new Set([
+  'file-history-snapshot',
+  'change',
+  'queue-operation',
+]);
 const emptyCancellationSubscription = {
   dispose() {},
 };
@@ -155,6 +200,11 @@ type ClaudeCapturedComm = {
     has?(ref: string): boolean;
   };
   interruptClaude?: (ref: string) => Promise<void>;
+  transportMessage?: (
+    ref: string,
+    message: ClaudeTransportUserMessage,
+    done: boolean,
+  ) => Promise<void> | void;
   listSessions?: () => Promise<unknown> | unknown;
 };
 
@@ -193,6 +243,17 @@ type ClaudeInterruptBridgeInspection = {
   state: ClaudeInterruptBridgeState;
   commMatched: boolean;
   comm: ClaudeCapturedComm | null;
+};
+
+type ClaudeTransportUserMessage = {
+  type: 'user';
+  uuid: string;
+  session_id: string;
+  parent_tool_use_id: null;
+  message: {
+    role: 'user';
+    content: string;
+  };
 };
 
 export function resolveExthostLogDir(
@@ -518,11 +579,343 @@ function consumeCodexLogChunk(params: {
   return trailingLine;
 }
 
+function parseWorkspaceFsPath(
+  workspace: WorkspaceLocator | undefined,
+): string | null {
+  const fileUri =
+    workspace?.folderUris?.[0] ??
+    workspace?.workspaceFileUri ??
+    null;
+  if (!fileUri) {
+    return null;
+  }
+
+  try {
+    return fileURLToPath(fileUri);
+  } catch {
+    return null;
+  }
+}
+
+function getClaudeSessionFilePaths(
+  workspace: WorkspaceLocator | undefined,
+  providerSessionRef: string,
+): string[] {
+  const workspacePath = parseWorkspaceFsPath(workspace);
+  if (!workspacePath) {
+    return [];
+  }
+
+  const claudeConfigDir =
+    process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
+  const rawProjectId = workspacePath.replace(/[^a-zA-Z0-9-]/g, '-');
+  const resolvedProjectId = resolve(workspacePath).replace(/[^a-zA-Z0-9-]/g, '-');
+  const candidatePaths = [
+    join(claudeConfigDir, 'projects', resolvedProjectId, `${providerSessionRef}.jsonl`),
+  ];
+
+  if (rawProjectId !== resolvedProjectId) {
+    candidatePaths.push(
+      join(claudeConfigDir, 'projects', rawProjectId, `${providerSessionRef}.jsonl`),
+    );
+  }
+
+  return [...new Set(candidatePaths)];
+}
+
+function extractClaudeSessionText(
+  value: unknown,
+  role: 'user' | 'assistant',
+): string | null {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text.length > 0 ? text : null;
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const texts: string[] = [];
+  for (const block of value) {
+    if (typeof block === 'string') {
+      if (block.trim().length > 0) {
+        texts.push(block);
+      }
+      continue;
+    }
+
+    if (!block || typeof block !== 'object') {
+      continue;
+    }
+
+    if (
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+    ) {
+      texts.push((block as { text: string }).text);
+      continue;
+    }
+
+    if (
+      role === 'assistant' &&
+      (block as { type?: unknown }).type === 'output_text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+    ) {
+      texts.push((block as { text: string }).text);
+    }
+  }
+
+  const text = texts.join('\n').trim();
+  return text.length > 0 ? text : null;
+}
+
+function parseClaudeSessionMessageEvent(line: string): ProviderEvent | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+
+  const type = (parsed as { type?: unknown }).type;
+  if (typeof type !== 'string' || claudeInternalSessionEventTypes.has(type)) {
+    return null;
+  }
+
+  if (type !== 'user' && type !== 'assistant') {
+    return null;
+  }
+
+  const message = (parsed as { message?: unknown }).message;
+  if (!message || typeof message !== 'object') {
+    return null;
+  }
+
+  const content = (message as { content?: unknown }).content;
+  if (type === 'user') {
+    if ((parsed as { isSidechain?: unknown }).isSidechain === true) {
+      return null;
+    }
+    if ((parsed as { isMeta?: unknown }).isMeta === true) {
+      return null;
+    }
+  }
+
+  const text = extractClaudeSessionText(content, type);
+  if (!text) {
+    return null;
+  }
+
+  return {
+    type: 'session.message.delta',
+    payload: {
+      role: type,
+      text,
+    },
+  };
+}
+
+function extractCodexSessionText(
+  value: unknown,
+  role: 'user' | 'assistant',
+): string | null {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text.length > 0 ? text : null;
+  }
+
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const texts: string[] = [];
+  for (const block of value) {
+    if (typeof block === 'string') {
+      if (block.trim().length > 0) {
+        texts.push(block);
+      }
+      continue;
+    }
+
+    if (!block || typeof block !== 'object') {
+      continue;
+    }
+
+    const blockType = (block as { type?: unknown }).type;
+    const text = (block as { text?: unknown }).text;
+    if (
+      role === 'user' &&
+      blockType === 'input_text' &&
+      typeof text === 'string'
+    ) {
+      texts.push(text);
+      continue;
+    }
+
+    if (
+      role === 'assistant' &&
+      blockType === 'output_text' &&
+      typeof text === 'string'
+    ) {
+      texts.push(text);
+    }
+  }
+
+  const text = texts.join('\n').trim();
+  return text.length > 0 ? text : null;
+}
+
+function parseCodexSessionMessageEvent(line: string): ProviderEvent | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+
+  if ((parsed as { type?: unknown }).type !== 'response_item') {
+    return null;
+  }
+
+  const payload = (parsed as { payload?: unknown }).payload;
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const role = (payload as { role?: unknown }).role;
+  if (role !== 'user' && role !== 'assistant') {
+    return null;
+  }
+
+  const text = extractCodexSessionText(
+    (payload as { content?: unknown }).content,
+    role,
+  );
+  if (!text) {
+    return null;
+  }
+
+  return {
+    type: 'session.message.delta',
+    payload: {
+      role,
+      text,
+    },
+  };
+}
+
+function consumeSessionFileChunk(params: {
+  chunk: string;
+  remainder: string;
+  onEvent: (event: ProviderEvent) => void;
+  parseLine: (line: string) => ProviderEvent | null;
+}): string {
+  const buffered = params.remainder + params.chunk;
+  const lines = buffered.split(/\r?\n/);
+  const endsWithNewline = buffered.endsWith('\n') || buffered.endsWith('\r');
+  const completeLines = endsWithNewline ? lines : lines.slice(0, -1);
+
+  for (const line of completeLines) {
+    const event = params.parseLine(line);
+    if (event) {
+      params.onEvent(event);
+    }
+  }
+
+  if (endsWithNewline) {
+    return '';
+  }
+
+  const trailingLine = lines.at(-1) ?? '';
+  const trailingEvent = params.parseLine(trailingLine);
+  if (trailingEvent) {
+    params.onEvent(trailingEvent);
+    return '';
+  }
+
+  return trailingLine;
+}
+
+async function findCodexSessionFile(
+  providerSessionRef: string,
+): Promise<string | null> {
+  const codexHomeDir = process.env.CODEX_HOME ?? join(homedir(), '.codex');
+  const sessionsDir = join(codexHomeDir, 'sessions');
+
+  const search = async (directoryPath: string): Promise<string | null> => {
+    let dirents;
+    try {
+      dirents = await readdir(directoryPath, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+
+    for (const dirent of dirents) {
+      const fullPath = join(directoryPath, dirent.name);
+      if (dirent.isDirectory()) {
+        const nested = await search(fullPath);
+        if (nested) {
+          return nested;
+        }
+        continue;
+      }
+
+      if (
+        dirent.isFile() &&
+        dirent.name.endsWith('.jsonl') &&
+        dirent.name.includes(providerSessionRef)
+      ) {
+        return fullPath;
+      }
+    }
+
+    return null;
+  };
+
+  return search(sessionsDir);
+}
+
 function findClaudeInterruptComm(
   providerCapture: unknown,
   runtimeChannelRef: string,
 ): ClaudeCapturedComm | null {
   return inspectClaudeInterruptBridge(providerCapture, runtimeChannelRef).comm;
+}
+
+function findClaudeCommByRuntimeChannel(
+  providerCapture: unknown,
+  runtimeChannelRef: string | undefined,
+): ClaudeCapturedComm | null {
+  if (!providerCapture || !runtimeChannelRef) {
+    return null;
+  }
+
+  const allComms = (providerCapture as ClaudeCapturedProvider | null | undefined)
+    ?.allComms;
+  if (!allComms) {
+    return null;
+  }
+
+  for (const candidate of allComms) {
+    const comm = candidate as ClaudeCapturedComm;
+    if (
+      typeof comm.channels?.has === 'function' &&
+      comm.channels.has(runtimeChannelRef)
+    ) {
+      return comm;
+    }
+  }
+
+  return null;
 }
 
 function inspectClaudeInterruptBridge(
@@ -555,31 +948,29 @@ function inspectClaudeInterruptBridge(
     };
   }
 
-  for (const candidate of allComms) {
-    const comm = candidate as ClaudeCapturedComm;
-    if (
-      typeof comm.channels?.has === 'function' &&
-      comm.channels.has(runtimeChannelRef)
-    ) {
-      if (typeof comm.interruptClaude === 'function') {
-        return {
-          state: 'ready',
-          commMatched: true,
-          comm,
-        };
-      }
+  const comm = findClaudeCommByRuntimeChannel(
+    providerCapture,
+    runtimeChannelRef,
+  );
+  if (!comm) {
+    return {
+      state: 'comm_not_found',
+      commMatched: false,
+      comm: null,
+    };
+  }
 
-      return {
-        state: 'interrupt_method_missing',
-        commMatched: true,
-        comm: null,
-      };
-    }
+  if (typeof comm.interruptClaude === 'function') {
+    return {
+      state: 'ready',
+      commMatched: true,
+      comm,
+    };
   }
 
   return {
-    state: 'comm_not_found',
-    commMatched: false,
+    state: 'interrupt_method_missing',
+    commMatched: true,
     comm: null,
   };
 }
@@ -596,6 +987,21 @@ function buildClaudeBridgeDiagnostics(
     runtimeChannelRef: runtimeChannelRef ?? null,
     interruptBridgeState: inspection.state,
     interruptCommMatched: inspection.commMatched,
+  };
+}
+
+function createClaudeTransportUserMessage(
+  text: string,
+): ClaudeTransportUserMessage {
+  return {
+    type: 'user',
+    uuid: randomUUID(),
+    session_id: '',
+    parent_tool_use_id: null,
+    message: {
+      role: 'user',
+      content: text,
+    },
   };
 }
 
@@ -1294,84 +1700,169 @@ function createClaudeFactory(params: {
         }
       : undefined;
 
-    const watchSession = params.exthostLogDir
-      ? async (providerSessionRef: string, onEvent: (event: ProviderEvent) => void) => {
-          const claudeLogDir = join(params.exthostLogDir!, 'Anthropic.claude-code');
-          const offsets = new Map<string, number>();
-          const remainders = new Map<string, string>();
-
-          for (const path of await listMatchingLogPaths(claudeLogDir, claudeLogPattern)) {
-            try {
-              offsets.set(path, (await readFile(path, 'utf8')).length);
-            } catch {
-              // Ignore transient log file reads; the next poll will retry.
-            }
+    const sendMessageViaCapturedLiveChannel = capturedClaudeProvider
+      ? async (
+          providerSessionRef: string,
+          text: string,
+        ): Promise<boolean> => {
+          let runtimeChannelRef = runtimeChannelRefs.get(providerSessionRef);
+          if (!runtimeChannelRef) {
+            await listSessions();
+            runtimeChannelRef = runtimeChannelRefs.get(providerSessionRef);
           }
 
-          let disposed = false;
-          let polling = false;
-          const poll = async () => {
-            if (disposed || polling) {
-              return;
-            }
+          if (!runtimeChannelRef) {
+            return false;
+          }
 
-            polling = true;
-            try {
-              const paths = await listMatchingLogPaths(claudeLogDir, claudeLogPattern);
-              for (const path of paths) {
-                let content: string;
-                try {
-                  content = await readFile(path, 'utf8');
-                } catch {
-                  continue;
-                }
-
-                const previousOffset = offsets.get(path);
-                const startOffset =
-                  previousOffset === undefined
-                    ? 0
-                    : content.length < previousOffset
-                      ? 0
-                      : previousOffset;
-                offsets.set(path, content.length);
-
-                const chunk = content.slice(startOffset);
-                if (chunk.length === 0) {
-                  continue;
-                }
-
-                const remainder = consumeClaudeLogChunk({
-                  chunk,
-                  providerSessionRef,
-                  remainder: remainders.get(path) ?? '',
-                  onEvent,
-                });
-
-                if (remainder.length > 0) {
-                  remainders.set(path, remainder);
-                } else {
-                  remainders.delete(path);
-                }
-              }
-            } finally {
-              polling = false;
-            }
-          };
-
-          const timer = setInterval(
-            () => void poll(),
-            params.watchPollMs ?? defaultWatchPollMs,
+          const comm = findClaudeCommByRuntimeChannel(
+            capturedClaudeProvider,
+            runtimeChannelRef,
           );
-          if (typeof timer.unref === 'function') {
-            timer.unref();
+          if (!comm || typeof comm.transportMessage !== 'function') {
+            return false;
           }
 
-          return () => {
-            disposed = true;
-            clearInterval(timer);
-          };
+          await comm.transportMessage.call(
+            comm,
+            runtimeChannelRef,
+            createClaudeTransportUserMessage(text),
+            false,
+          );
+
+          return true;
         }
       : undefined;
+
+    const watchSession =
+      params.exthostLogDir || parseWorkspaceFsPath(params.workspace)
+        ? async (providerSessionRef: string, onEvent: (event: ProviderEvent) => void) => {
+            const claudeLogDir = params.exthostLogDir
+              ? join(params.exthostLogDir, 'Anthropic.claude-code')
+              : null;
+            const offsets = new Map<string, number>();
+            const remainders = new Map<string, string>();
+
+            if (claudeLogDir) {
+              for (const path of await listMatchingLogPaths(claudeLogDir, claudeLogPattern)) {
+                try {
+                  offsets.set(path, (await readFile(path, 'utf8')).length);
+                } catch {
+                  // Ignore transient log file reads; the next poll will retry.
+                }
+              }
+            }
+
+            for (const path of getClaudeSessionFilePaths(params.workspace, providerSessionRef)) {
+              try {
+                offsets.set(path, (await readFile(path, 'utf8')).length);
+              } catch {
+                // The session file may appear after the watch starts.
+              }
+            }
+
+            let disposed = false;
+            let polling = false;
+            const poll = async () => {
+              if (disposed || polling) {
+                return;
+              }
+
+              polling = true;
+              try {
+                if (claudeLogDir) {
+                  const paths = await listMatchingLogPaths(claudeLogDir, claudeLogPattern);
+                  for (const path of paths) {
+                    let content: string;
+                    try {
+                      content = await readFile(path, 'utf8');
+                    } catch {
+                      continue;
+                    }
+
+                    const previousOffset = offsets.get(path);
+                    const startOffset =
+                      previousOffset === undefined
+                        ? 0
+                        : content.length < previousOffset
+                          ? 0
+                          : previousOffset;
+                    offsets.set(path, content.length);
+
+                    const chunk = content.slice(startOffset);
+                    if (chunk.length === 0) {
+                      continue;
+                    }
+
+                    const remainder = consumeClaudeLogChunk({
+                      chunk,
+                      providerSessionRef,
+                      remainder: remainders.get(path) ?? '',
+                      onEvent,
+                    });
+
+                    if (remainder.length > 0) {
+                      remainders.set(path, remainder);
+                    } else {
+                      remainders.delete(path);
+                    }
+                  }
+                }
+
+                for (const path of getClaudeSessionFilePaths(params.workspace, providerSessionRef)) {
+                  let content: string;
+                  try {
+                    content = await readFile(path, 'utf8');
+                  } catch {
+                    continue;
+                  }
+
+                  const previousOffset = offsets.get(path);
+                  const startOffset =
+                    previousOffset === undefined
+                      ? 0
+                      : content.length < previousOffset
+                        ? 0
+                        : previousOffset;
+                  offsets.set(path, content.length);
+
+                  const chunk = content.slice(startOffset);
+                  if (chunk.length === 0) {
+                    continue;
+                  }
+
+                  const remainder = consumeSessionFileChunk({
+                    chunk,
+                    remainder: remainders.get(path) ?? '',
+                    onEvent,
+                    parseLine: parseClaudeSessionMessageEvent,
+                  });
+
+                  if (remainder.length > 0) {
+                    remainders.set(path, remainder);
+                  } else {
+                    remainders.delete(path);
+                  }
+                }
+              } finally {
+                polling = false;
+              }
+            };
+
+            const timer = setInterval(
+              () => void poll(),
+              params.watchPollMs ?? defaultWatchPollMs,
+            );
+            if (typeof timer.unref === 'function') {
+              timer.unref();
+            }
+
+            return () => {
+              disposed = true;
+              clearInterval(timer);
+            };
+          }
+        : undefined;
 
     const runtimeProbe = new ClaudeRuntimeProbe(resolution, {
       listSessions: async () => {
@@ -1401,6 +1892,16 @@ function createClaudeFactory(params: {
       },
       watchSession,
       sendMessage: async (providerSessionRef, text) => {
+        if (
+          sendMessageViaCapturedLiveChannel &&
+          await sendMessageViaCapturedLiveChannel(
+            providerSessionRef,
+            text,
+          )
+        ) {
+          return;
+        }
+
         await params.commandExecutor!(
           claudeOpenSessionCommandId,
           providerSessionRef,
@@ -1430,6 +1931,135 @@ function hasCommands(
 
 function codexThreadUri(providerSessionRef: string): string {
   return `openai-codex://route/local/${providerSessionRef}`;
+}
+
+function getCapturedCodexViewProvider(
+  providerCaptures: ProviderRuntimeCaptureRegistry | undefined,
+): CodexCapturedViewProvider | null {
+  return (
+    providerCaptures?.getCapturedViewProvider?.('codex') ?? null
+  ) as CodexCapturedViewProvider | null;
+}
+
+async function activateCodexSessionViaCapturedView(
+  providerCapture: CodexCapturedViewProvider | null,
+  providerSessionRef: string,
+): Promise<boolean> {
+  if (!providerCapture) {
+    return false;
+  }
+
+  const path = `/local/${providerSessionRef}`;
+  if (typeof providerCapture.navigateToRoute === 'function') {
+    await providerCapture.navigateToRoute(path);
+    return true;
+  }
+
+  if (
+    providerCapture.sidebarView?.webview &&
+    typeof providerCapture.postMessageToWebview === 'function'
+  ) {
+    await providerCapture.postMessageToWebview(
+      providerCapture.sidebarView.webview,
+      {
+        type: 'navigate-to-route',
+        path,
+      },
+    );
+    return true;
+  }
+
+  return false;
+}
+
+function resolveCodexPanelWebview(
+  panel: unknown,
+): unknown | null {
+  if (
+    !panel ||
+    (typeof panel !== 'object' && typeof panel !== 'function')
+  ) {
+    return null;
+  }
+
+  return (panel as { webview?: unknown }).webview ?? null;
+}
+
+function resolveCodexThreadFollowerWebview(
+  providerCapture: CodexCapturedViewProvider | null,
+  providerSessionRef: string,
+): unknown | null {
+  if (!providerCapture) {
+    return null;
+  }
+
+  const editorPanels = toEntryArray(providerCapture.editorPanels);
+  const focusedPanel =
+    providerCapture.focusedView?.kind === 'panel'
+      ? providerCapture.focusedView.panel
+      : null;
+
+  if (focusedPanel) {
+    for (const [panel, panelState] of editorPanels) {
+      if (panel !== focusedPanel) {
+        continue;
+      }
+
+      const panelSessionRef = parseCodexRouteSessionRef(
+        (panelState as CodexCapturedViewPanelState | null | undefined)
+          ?.initialRoute as string | null | undefined,
+      );
+      if (panelSessionRef !== providerSessionRef) {
+        continue;
+      }
+
+      const webview = resolveCodexPanelWebview(panel);
+      if (webview) {
+        return webview;
+      }
+    }
+  }
+
+  for (const [panel, panelState] of editorPanels) {
+    const panelSessionRef = parseCodexRouteSessionRef(
+      (panelState as CodexCapturedViewPanelState | null | undefined)
+        ?.initialRoute as string | null | undefined,
+    );
+    if (panelSessionRef !== providerSessionRef) {
+      continue;
+    }
+
+    const webview = resolveCodexPanelWebview(panel);
+    if (webview) {
+      return webview;
+    }
+  }
+
+  return providerCapture.sidebarView?.webview ?? null;
+}
+
+function createCodexThreadFollowerStartTurnRequest(
+  providerSessionRef: string,
+  text: string,
+): CodexThreadFollowerStartTurnRequest {
+  return {
+    conversationId: providerSessionRef,
+    turnStartParams: {
+      input: [
+        {
+          type: 'text',
+          text,
+          text_elements: [],
+        },
+      ],
+      cwd: null,
+      approvalPolicy: null,
+      sandboxPolicy: null,
+      model: null,
+      effort: null,
+      collaborationMode: null,
+    },
+  };
 }
 
 function createCodexFactory(params: {
@@ -1487,101 +2117,220 @@ function createCodexFactory(params: {
       };
     }
 
-    const openSession = async (providerSessionRef: string) => {
-      const uri = params.createUri!(codexThreadUri(providerSessionRef));
-      if (useOpenWith) {
-        await params.commandExecutor!(
-          codexOpenWithCommandId,
-          uri,
-          codexConversationEditorViewType,
-          {
-            preview: false,
-          },
-        );
-      } else {
-        await params.commandExecutor!(codexOpenCommandId, uri);
+    const activateSession = async (
+      providerSessionRef: string,
+      options: {
+        focusInput?: boolean;
+      } = {},
+    ) => {
+      const providerCapture = getCapturedCodexViewProvider(params.providerCaptures);
+      const activatedViaCapturedView = await activateCodexSessionViaCapturedView(
+        providerCapture,
+        providerSessionRef,
+      );
+
+      if (!activatedViaCapturedView) {
+        const uri = params.createUri!(codexThreadUri(providerSessionRef));
+        if (useOpenWith) {
+          await params.commandExecutor!(
+            codexOpenWithCommandId,
+            uri,
+            codexConversationEditorViewType,
+            {
+              preview: false,
+            },
+          );
+        } else {
+          await params.commandExecutor!(codexOpenCommandId, uri);
+        }
       }
-      await params.commandExecutor!(codexFocusInputCommandId);
+
+      if (options.focusInput ?? true) {
+        await params.commandExecutor!(codexFocusInputCommandId);
+      }
+
+      return {
+        providerCapture,
+        activatedViaCapturedView,
+      };
     };
 
-    const watchSession = params.exthostLogDir
-      ? async (providerSessionRef: string, onEvent: (event: ProviderEvent) => void) => {
-          const codexLogDir = join(params.exthostLogDir!, 'openai.chatgpt');
-          const offsets = new Map<string, number>();
-          const remainders = new Map<string, string>();
+    const sendMessageViaCapturedThreadFollower = async (
+      providerSessionRef: string,
+      text: string,
+    ): Promise<boolean> => {
+      const providerCapture = getCapturedCodexViewProvider(
+        params.providerCaptures,
+      );
+      if (
+        !providerCapture ||
+        typeof providerCapture.handleThreadFollowerStartTurnRequest !==
+          'function'
+      ) {
+        return false;
+      }
 
-          for (const path of await listMatchingLogPaths(codexLogDir, codexLogPattern)) {
-            try {
-              offsets.set(path, (await readFile(path, 'utf8')).length);
-            } catch {
-              // Ignore transient log file reads; the next poll will retry.
-            }
-          }
+      await activateSession(
+        providerSessionRef,
+        {
+          focusInput: false,
+        },
+      );
 
-          let disposed = false;
-          let polling = false;
-          const poll = async () => {
-            if (disposed || polling) {
-              return;
-            }
+      const webview = resolveCodexThreadFollowerWebview(
+        providerCapture,
+        providerSessionRef,
+      );
+      if (!webview) {
+        return false;
+      }
 
-            polling = true;
-            try {
-              const paths = await listMatchingLogPaths(codexLogDir, codexLogPattern);
-              for (const path of paths) {
-                let content: string;
+      await providerCapture.handleThreadFollowerStartTurnRequest.call(
+        providerCapture,
+        webview,
+        randomUUID(),
+        createCodexThreadFollowerStartTurnRequest(
+          providerSessionRef,
+          text,
+        ),
+      );
+
+      return true;
+    };
+
+    const watchSession =
+      params.exthostLogDir || Boolean(process.env.CODEX_HOME)
+        ? async (providerSessionRef: string, onEvent: (event: ProviderEvent) => void) => {
+            const codexLogDir = params.exthostLogDir
+              ? join(params.exthostLogDir, 'openai.chatgpt')
+              : null;
+            const offsets = new Map<string, number>();
+            const remainders = new Map<string, string>();
+            let sessionFilePath = await findCodexSessionFile(providerSessionRef);
+
+            if (codexLogDir) {
+              for (const path of await listMatchingLogPaths(codexLogDir, codexLogPattern)) {
                 try {
-                  content = await readFile(path, 'utf8');
+                  offsets.set(path, (await readFile(path, 'utf8')).length);
                 } catch {
-                  continue;
-                }
-
-                const previousOffset = offsets.get(path);
-                const startOffset =
-                  previousOffset === undefined
-                    ? 0
-                    : content.length < previousOffset
-                      ? 0
-                      : previousOffset;
-                offsets.set(path, content.length);
-
-                const chunk = content.slice(startOffset);
-                if (chunk.length === 0) {
-                  continue;
-                }
-
-                const remainder = consumeCodexLogChunk({
-                  chunk,
-                  providerSessionRef,
-                  remainder: remainders.get(path) ?? '',
-                  onEvent,
-                });
-
-                if (remainder.length > 0) {
-                  remainders.set(path, remainder);
-                } else {
-                  remainders.delete(path);
+                  // Ignore transient log file reads; the next poll will retry.
                 }
               }
-            } finally {
-              polling = false;
             }
-          };
 
-          const timer = setInterval(
-            () => void poll(),
-            params.watchPollMs ?? defaultWatchPollMs,
-          );
-          if (typeof timer.unref === 'function') {
-            timer.unref();
+            if (sessionFilePath) {
+              try {
+                offsets.set(sessionFilePath, (await readFile(sessionFilePath, 'utf8')).length);
+              } catch {
+                sessionFilePath = null;
+              }
+            }
+
+            let disposed = false;
+            let polling = false;
+            const poll = async () => {
+              if (disposed || polling) {
+                return;
+              }
+
+              polling = true;
+              try {
+                if (codexLogDir) {
+                  const paths = await listMatchingLogPaths(codexLogDir, codexLogPattern);
+                  for (const path of paths) {
+                    let content: string;
+                    try {
+                      content = await readFile(path, 'utf8');
+                    } catch {
+                      continue;
+                    }
+
+                    const previousOffset = offsets.get(path);
+                    const startOffset =
+                      previousOffset === undefined
+                        ? 0
+                        : content.length < previousOffset
+                          ? 0
+                          : previousOffset;
+                    offsets.set(path, content.length);
+
+                    const chunk = content.slice(startOffset);
+                    if (chunk.length === 0) {
+                      continue;
+                    }
+
+                    const remainder = consumeCodexLogChunk({
+                      chunk,
+                      providerSessionRef,
+                      remainder: remainders.get(path) ?? '',
+                      onEvent,
+                    });
+
+                    if (remainder.length > 0) {
+                      remainders.set(path, remainder);
+                    } else {
+                      remainders.delete(path);
+                    }
+                  }
+                }
+
+                if (!sessionFilePath) {
+                  sessionFilePath = await findCodexSessionFile(providerSessionRef);
+                }
+
+                if (sessionFilePath) {
+                  let content: string;
+                  try {
+                    content = await readFile(sessionFilePath, 'utf8');
+                  } catch {
+                    sessionFilePath = null;
+                    return;
+                  }
+
+                  const previousOffset = offsets.get(sessionFilePath);
+                  const startOffset =
+                    previousOffset === undefined
+                      ? 0
+                      : content.length < previousOffset
+                        ? 0
+                        : previousOffset;
+                  offsets.set(sessionFilePath, content.length);
+
+                  const chunk = content.slice(startOffset);
+                  if (chunk.length > 0) {
+                    const remainder = consumeSessionFileChunk({
+                      chunk,
+                      remainder: remainders.get(sessionFilePath) ?? '',
+                      onEvent,
+                      parseLine: parseCodexSessionMessageEvent,
+                    });
+
+                    if (remainder.length > 0) {
+                      remainders.set(sessionFilePath, remainder);
+                    } else {
+                      remainders.delete(sessionFilePath);
+                    }
+                  }
+                }
+              } finally {
+                polling = false;
+              }
+            };
+
+            const timer = setInterval(
+              () => void poll(),
+              params.watchPollMs ?? defaultWatchPollMs,
+            );
+            if (typeof timer.unref === 'function') {
+              timer.unref();
+            }
+
+            return () => {
+              disposed = true;
+              clearInterval(timer);
+            };
           }
-
-          return () => {
-            disposed = true;
-            clearInterval(timer);
-          };
-        }
-      : undefined;
+        : undefined;
 
     const runtimeProbe = new CodexRuntimeProbe(resolution, {
       listSessions: async () => {
@@ -1600,13 +2349,22 @@ function createCodexFactory(params: {
       },
       watchSession,
       sendMessage: async (providerSessionRef, text) => {
-        await openSession(providerSessionRef);
+        if (
+          await sendMessageViaCapturedThreadFollower(
+            providerSessionRef,
+            text,
+          )
+        ) {
+          return;
+        }
+
+        await activateSession(providerSessionRef);
         await params.commandExecutor!(codexTypeCommandId, { text });
         await params.commandExecutor!(codexSubmitCommandId);
       },
       interrupt: resolution.commands.includes(codexCancelCommandId)
         ? async (providerSessionRef) => {
-            await openSession(providerSessionRef);
+            await activateSession(providerSessionRef);
             await params.commandExecutor!(codexCancelCommandId);
           }
         : undefined,

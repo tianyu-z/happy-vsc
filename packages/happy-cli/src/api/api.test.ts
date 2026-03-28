@@ -1,12 +1,40 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ApiClient } from './api';
 import axios from 'axios';
-import { connectionState } from '@/utils/serverConnectionErrors';
 
 // Use vi.hoisted to ensure mock functions are available when vi.mock factory runs
 const { mockPost, mockIsAxiosError } = vi.hoisted(() => ({
     mockPost: vi.fn(),
     mockIsAxiosError: vi.fn(() => true)
+}));
+
+const {
+    mockDecodeBase64,
+    mockDecrypt,
+    mockEncodeBase64,
+    mockEncrypt,
+    mockGetRandomBytes,
+    mockLibsodiumEncryptForPublicKey,
+    mockReadSessionDataKey,
+    mockWriteSessionDataKey,
+    mockConnectionState,
+    mockIsNetworkError,
+} = vi.hoisted(() => ({
+    mockDecodeBase64: vi.fn((data: string) => data),
+    mockDecrypt: vi.fn((data: any) => data),
+    mockEncodeBase64: vi.fn((data: any) => data),
+    mockEncrypt: vi.fn((data: any) => data),
+    mockGetRandomBytes: vi.fn(() => new Uint8Array(32).fill(7)),
+    mockLibsodiumEncryptForPublicKey: vi.fn(() => new Uint8Array(32).fill(9)),
+    mockReadSessionDataKey: vi.fn(async () => null),
+    mockWriteSessionDataKey: vi.fn(async () => undefined),
+    mockConnectionState: {
+        reset: vi.fn(),
+        fail: vi.fn(),
+    },
+    mockIsNetworkError: vi.fn((code: string | undefined) =>
+        ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT'].includes(code ?? '')
+    ),
 }));
 
 vi.mock('axios', () => ({
@@ -23,24 +51,39 @@ vi.mock('@/ui/logger', () => ({
     }
 }));
 
+vi.mock('./apiSession', () => ({
+    ApiSessionClient: class {}
+}));
+
+vi.mock('./apiMachine', () => ({
+    ApiMachineClient: class {}
+}));
+
 // Mock encryption utilities
 vi.mock('./encryption', () => ({
-    decodeBase64: vi.fn((data: string) => data),
-    encodeBase64: vi.fn((data: any) => data),
-    decrypt: vi.fn((data: any) => data),
-    encrypt: vi.fn((data: any) => data)
+    decodeBase64: mockDecodeBase64,
+    encodeBase64: mockEncodeBase64,
+    decrypt: mockDecrypt,
+    encrypt: mockEncrypt,
+    getRandomBytes: mockGetRandomBytes,
+    libsodiumEncryptForPublicKey: mockLibsodiumEncryptForPublicKey,
 }));
 
 // Mock configuration
-vi.mock('./configuration', () => ({
+vi.mock('@/configuration', () => ({
     configuration: {
         serverUrl: 'https://api.example.com'
     }
 }));
 
-// Mock libsodium encryption
-vi.mock('./libsodiumEncryption', () => ({
-    libsodiumEncryptForPublicKey: vi.fn((data: any) => new Uint8Array(32))
+vi.mock('./sessionDataKeyCache', () => ({
+    readSessionDataKey: mockReadSessionDataKey,
+    writeSessionDataKey: mockWriteSessionDataKey,
+}));
+
+vi.mock('@/utils/serverConnectionErrors', () => ({
+    connectionState: mockConnectionState,
+    isNetworkError: mockIsNetworkError,
 }));
 
 // Global test metadata
@@ -67,7 +110,15 @@ describe('Api server error handling', () => {
 
     beforeEach(async () => {
         vi.clearAllMocks();
-        connectionState.reset(); // Reset offline state between tests
+        mockConnectionState.reset(); // Reset offline state between tests
+        mockDecodeBase64.mockImplementation((data: string) => data);
+        mockDecrypt.mockImplementation((data: any) => data);
+        mockEncodeBase64.mockImplementation((data: any) => data);
+        mockEncrypt.mockImplementation((data: any) => data);
+        mockGetRandomBytes.mockImplementation(() => new Uint8Array(32).fill(7));
+        mockLibsodiumEncryptForPublicKey.mockImplementation(() => new Uint8Array(32).fill(9));
+        mockReadSessionDataKey.mockResolvedValue(null);
+        mockWriteSessionDataKey.mockResolvedValue(undefined);
 
         // Create a mock credential
         const mockCredential = {
@@ -83,8 +134,6 @@ describe('Api server error handling', () => {
 
     describe('getOrCreateSession', () => {
         it('should return null when Happy server is unreachable (ECONNREFUSED)', async () => {
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
             // Mock axios to throw connection refused error
             mockPost.mockRejectedValue({ code: 'ECONNREFUSED' });
 
@@ -95,16 +144,16 @@ describe('Api server error handling', () => {
             });
 
             expect(result).toBeNull();
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('⚠️  Happy server unreachable')
-            );
-
-            consoleSpy.mockRestore();
+            expect(mockConnectionState.fail).toHaveBeenCalledWith({
+                operation: 'Session creation',
+                caller: 'api.getOrCreateSession',
+                errorCode: 'ECONNREFUSED',
+                url: 'https://api.example.com/v1/sessions',
+            });
         });
 
         it('should return null when Happy server cannot be found (ENOTFOUND)', async () => {
-            connectionState.reset();
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            mockConnectionState.reset();
 
             // Mock axios to throw DNS resolution error
             mockPost.mockRejectedValue({ code: 'ENOTFOUND' });
@@ -116,16 +165,16 @@ describe('Api server error handling', () => {
             });
 
             expect(result).toBeNull();
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('⚠️  Happy server unreachable')
-            );
-
-            consoleSpy.mockRestore();
+            expect(mockConnectionState.fail).toHaveBeenCalledWith({
+                operation: 'Session creation',
+                caller: 'api.getOrCreateSession',
+                errorCode: 'ENOTFOUND',
+                url: 'https://api.example.com/v1/sessions',
+            });
         });
 
         it('should return null when Happy server times out (ETIMEDOUT)', async () => {
-            connectionState.reset();
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            mockConnectionState.reset();
 
             // Mock axios to throw timeout error
             mockPost.mockRejectedValue({ code: 'ETIMEDOUT' });
@@ -137,16 +186,16 @@ describe('Api server error handling', () => {
             });
 
             expect(result).toBeNull();
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('⚠️  Happy server unreachable')
-            );
-
-            consoleSpy.mockRestore();
+            expect(mockConnectionState.fail).toHaveBeenCalledWith({
+                operation: 'Session creation',
+                caller: 'api.getOrCreateSession',
+                errorCode: 'ETIMEDOUT',
+                url: 'https://api.example.com/v1/sessions',
+            });
         });
 
         it('should return null when session endpoint returns 404', async () => {
-            connectionState.reset();
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            mockConnectionState.reset();
 
             // Mock axios to return 404
             mockPost.mockRejectedValue({
@@ -161,20 +210,15 @@ describe('Api server error handling', () => {
             });
 
             expect(result).toBeNull();
-            // New unified format via connectionState.fail()
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('⚠️  Happy server unreachable')
-            );
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('Session creation failed: 404')
-            );
-
-            consoleSpy.mockRestore();
+            expect(mockConnectionState.fail).toHaveBeenCalledWith({
+                operation: 'Session creation',
+                errorCode: '404',
+                url: 'https://api.example.com/v1/sessions',
+            });
         });
 
         it('should return null when server returns 500 Internal Server Error', async () => {
-            connectionState.reset();
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            mockConnectionState.reset();
 
             // Mock axios to return 500 error
             mockPost.mockRejectedValue({
@@ -189,15 +233,16 @@ describe('Api server error handling', () => {
             });
 
             expect(result).toBeNull();
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('⚠️  Happy server unreachable')
-            );
-            consoleSpy.mockRestore();
+            expect(mockConnectionState.fail).toHaveBeenCalledWith({
+                operation: 'Session creation',
+                errorCode: '500',
+                url: 'https://api.example.com/v1/sessions',
+                details: ['Server encountered an error, will retry automatically'],
+            });
         });
 
         it('should return null when server returns 503 Service Unavailable', async () => {
-            connectionState.reset();
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            mockConnectionState.reset();
 
             // Mock axios to return 503 error
             mockPost.mockRejectedValue({
@@ -212,10 +257,12 @@ describe('Api server error handling', () => {
             });
 
             expect(result).toBeNull();
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('⚠️  Happy server unreachable')
-            );
-            consoleSpy.mockRestore();
+            expect(mockConnectionState.fail).toHaveBeenCalledWith({
+                operation: 'Session creation',
+                errorCode: '503',
+                url: 'https://api.example.com/v1/sessions',
+                details: ['Server encountered an error, will retry automatically'],
+            });
         });
 
         it('should re-throw non-connection errors', async () => {
@@ -235,12 +282,69 @@ describe('Api server error handling', () => {
             );
             consoleSpy.mockRestore();
         });
+
+        it('refreshes existing data-key sessions when stored metadata can no longer be decrypted', async () => {
+            const dataKeyApi = await ApiClient.create({
+                token: 'fake-token',
+                encryption: {
+                    type: 'dataKey' as const,
+                    publicKey: new Uint8Array(32).fill(1),
+                    machineKey: new Uint8Array(32).fill(2),
+                }
+            });
+
+            mockPost
+                .mockResolvedValueOnce({
+                    data: {
+                        session: {
+                            id: 'existing-session',
+                            seq: 3,
+                            metadata: 'encrypted-old-metadata',
+                            metadataVersion: 1,
+                            agentState: null,
+                            agentStateVersion: 0,
+                        }
+                    }
+                })
+                .mockResolvedValueOnce({
+                    data: {
+                        session: {
+                            id: 'existing-session',
+                            seq: 3,
+                            metadata: 'encrypted-refreshed-metadata',
+                            metadataVersion: 2,
+                            agentState: null,
+                            agentStateVersion: 0,
+                        }
+                    }
+                });
+
+            mockDecrypt
+                .mockReturnValueOnce(null)
+                .mockReturnValueOnce(testMetadata);
+
+            const result = await dataKeyApi.getOrCreateSession({
+                tag: 'broker:test-machine:test-session',
+                metadata: testMetadata,
+                state: null
+            });
+
+            expect(result?.metadata).toEqual(testMetadata);
+            expect(mockPost).toHaveBeenCalledTimes(2);
+            expect(mockPost.mock.calls[1]?.[1]).toMatchObject({
+                tag: 'broker:test-machine:test-session',
+                refreshOnExisting: true,
+            });
+            expect(mockWriteSessionDataKey).toHaveBeenCalledWith(
+                'broker:test-machine:test-session',
+                expect.any(Uint8Array),
+            );
+        });
     });
 
     describe('getOrCreateMachine', () => {
         it('should return minimal machine object when server is unreachable (ECONNREFUSED)', async () => {
-            connectionState.reset();
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            mockConnectionState.reset();
 
             // Mock axios to throw connection refused error
             mockPost.mockRejectedValue({ code: 'ECONNREFUSED' });
@@ -267,16 +371,16 @@ describe('Api server error handling', () => {
                 daemonStateVersion: 0,
             });
 
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('⚠️  Happy server unreachable')
-            );
-
-            consoleSpy.mockRestore();
+            expect(mockConnectionState.fail).toHaveBeenCalledWith({
+                operation: 'Machine registration',
+                caller: 'api.getOrCreateMachine',
+                errorCode: 'ECONNREFUSED',
+                url: 'https://api.example.com/v1/machines',
+            });
         });
 
         it('should return minimal machine object when server endpoint returns 404', async () => {
-            connectionState.reset();
-            const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            mockConnectionState.reset();
 
             // Mock axios to return 404
             mockPost.mockRejectedValue({
@@ -299,15 +403,11 @@ describe('Api server error handling', () => {
                 daemonStateVersion: 0,
             });
 
-            // New unified format via connectionState.fail()
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('⚠️  Happy server unreachable')
-            );
-            expect(consoleSpy).toHaveBeenCalledWith(
-                expect.stringContaining('Machine registration failed: 404')
-            );
-
-            consoleSpy.mockRestore();
+            expect(mockConnectionState.fail).toHaveBeenCalledWith({
+                operation: 'Machine registration',
+                errorCode: '404',
+                url: 'https://api.example.com/v1/machines',
+            });
         });
     });
 });

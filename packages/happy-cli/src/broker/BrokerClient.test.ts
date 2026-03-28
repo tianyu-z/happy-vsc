@@ -161,6 +161,8 @@ describe('BrokerClient', () => {
         brokerSessionId: params.brokerSessionId,
         provider: 'codex',
         latestSeq: 4,
+        runtimeProviderSessionRef: 'codex-runtime-ref-1',
+        storageProviderSessionRef: 'codex-storage-ref-1',
         capabilities: ['sendUserMessage'],
         degradedFlags: ['missing_editor_context'],
         ...makeRuntimeMetadata(),
@@ -171,6 +173,8 @@ describe('BrokerClient', () => {
       const client = new BrokerClient(server.url);
       await expect(client.attachSession('broker-sess-1')).resolves.toMatchObject({
         latestSeq: 4,
+        runtimeProviderSessionRef: 'codex-runtime-ref-1',
+        storageProviderSessionRef: 'codex-storage-ref-1',
         degradedFlags: ['missing_editor_context'],
         desiredMode: 'runtime_preferred',
       });

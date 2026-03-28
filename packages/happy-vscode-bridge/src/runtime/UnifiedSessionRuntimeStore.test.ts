@@ -10,6 +10,8 @@ function makeSession(
     provider: 'claude',
     providerSessionKey: 'v1|anthropic.claude-code|folder:file:///workspace|conversation-1',
     providerSessionRef: 'provider-session-ref-1',
+    runtimeProviderSessionRef: 'runtime-session-ref-1',
+    storageProviderSessionRef: 'storage-session-ref-1',
     title: 'Claude Session',
     latestSeq: 7,
     desiredMode: 'runtime_preferred',
@@ -74,6 +76,8 @@ describe('UnifiedSessionRuntimeStore', () => {
     expect(snapshot).toMatchObject({
       brokerSessionId: record.brokerSessionId,
       latestSeq: 7,
+      runtimeProviderSessionRef: 'runtime-session-ref-1',
+      storageProviderSessionRef: 'storage-session-ref-1',
       desiredMode: 'runtime_preferred',
       effectiveMode: 'runtime',
       modeReason: 'runtime_ready',

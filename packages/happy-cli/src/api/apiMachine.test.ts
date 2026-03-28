@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const discoverSessionsMock = vi.fn();
-const loadBrokerManifestMock = vi.fn();
+const discoverBrokerSessionCatalogMock = vi.fn();
+const resolveBrokerSessionAttachTargetMock = vi.fn();
+const resolveBrokerRootDirMock = vi.fn();
 const spawnSessionMock = vi.fn();
 
 vi.mock('node:os', async () => {
@@ -117,14 +118,13 @@ vi.mock('@/utils/time', () => ({
   backoff: vi.fn(),
 }));
 
-vi.mock('@/broker/brokerManifest', () => ({
-  loadBrokerManifest: loadBrokerManifestMock,
+vi.mock('@/broker/brokerSessionCatalog', () => ({
+  discoverBrokerSessionCatalog: discoverBrokerSessionCatalogMock,
+  resolveBrokerSessionAttachTarget: resolveBrokerSessionAttachTargetMock,
 }));
 
-vi.mock('@/broker/BrokerClient', () => ({
-  BrokerClient: vi.fn().mockImplementation(() => ({
-    discoverSessions: discoverSessionsMock,
-  })),
+vi.mock('@/broker/brokerRootDir', () => ({
+  resolveBrokerRootDir: resolveBrokerRootDirMock,
 }));
 
 async function createTestClient() {
@@ -175,10 +175,25 @@ async function callMachineRpc(client: unknown, method: string, params: Record<st
 describe('ApiMachineClient broker RPCs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    loadBrokerManifestMock.mockResolvedValue({
-      port: 7777,
-      token: 'broker-token',
-      url: 'ws://127.0.0.1:7777?token=broker-token',
+    resolveBrokerRootDirMock.mockReturnValue('/broker-root/.happy-vsc');
+    discoverBrokerSessionCatalogMock.mockResolvedValue({
+      sessions: [],
+    });
+    resolveBrokerSessionAttachTargetMock.mockReturnValue({
+      brokerRootDir: '/broker-root/.happy-vsc',
+      brokerUrl: 'ws://127.0.0.1:7777?token=broker-token',
+      session: {
+        brokerSessionId: 'broker-sess-1',
+        windowOrdinal: 1,
+      },
+      manifest: {
+        windowInstanceId: 'window-a',
+        windowLabel: 'Window A',
+        workspaceLabel: 'Workspace A',
+        workspacePath: '/workspace-a',
+        isActiveWindow: true,
+        windowLastActiveAt: '2026-03-23T12:00:00.000Z',
+      },
     });
     spawnSessionMock.mockResolvedValue({
       type: 'success',
@@ -187,21 +202,27 @@ describe('ApiMachineClient broker RPCs', () => {
   });
 
   it('lists broker sessions through the machine RPC layer', async () => {
-    discoverSessionsMock.mockResolvedValue([
+    discoverBrokerSessionCatalogMock.mockResolvedValue({
+      sessions: [
       {
         brokerSessionId: 'broker-sess-1',
         provider: 'claude',
         title: 'Broker Session',
-        lastActivityAt: '2026-03-23T12:00:00.000Z',
+        windowInstanceId: 'window-a',
+        windowLabel: 'Window A',
+        workspaceLabel: 'Workspace A',
+        windowOrdinal: 1,
       },
-    ]);
+      ],
+    });
 
     const client = await createTestClient();
 
     const result = await callMachineRpc(client, 'broker-list-sessions', {});
 
     expect(result.sessions[0].provider).toBe('claude');
-    expect(loadBrokerManifestMock).toHaveBeenCalledWith('/broker-root/.happy-vsc');
+    expect(result.sessions[0].windowOrdinal).toBe(1);
+    expect(discoverBrokerSessionCatalogMock).toHaveBeenCalledWith('/broker-root/.happy-vsc');
   });
 
   it('spawns a broker-attached worker through the daemon RPC layer', async () => {
@@ -218,8 +239,53 @@ describe('ApiMachineClient broker RPCs', () => {
       brokerRootDir: '/broker-root/.happy-vsc',
       brokerUrl: 'ws://127.0.0.1:7777?token=broker-token',
       brokerSessionId: 'broker-sess-1',
+      brokerWindowInstanceId: 'window-a',
+      brokerWindowLabel: 'Window A',
+      brokerWorkspaceLabel: 'Workspace A',
+      brokerWorkspacePath: '/workspace-a',
+      brokerWindowOrdinal: 1,
+      brokerWindowIsActive: true,
+      brokerWindowLastActiveAt: '2026-03-23T12:00:00.000Z',
     }));
-    expect(loadBrokerManifestMock).toHaveBeenCalledWith('/broker-root/.happy-vsc');
+    expect(discoverBrokerSessionCatalogMock).toHaveBeenCalledWith('/broker-root/.happy-vsc');
+    expect(resolveBrokerSessionAttachTargetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessions: expect.any(Array),
+      }),
+      'broker-sess-1',
+    );
+  });
+
+  it('spawns a broker-attached worker through spawn-happy-session HTTP transport', async () => {
+    const client = await createTestClient();
+
+    const result = await callMachineRpc(client, 'spawn-happy-session', {
+      type: 'broker-attach-session',
+      brokerSessionId: 'broker-sess-1',
+    });
+
+    expect(result).toEqual({ type: 'success', sessionId: 'happy-sess-1' });
+    expect(spawnSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      directory: '/broker-root/.happy-vsc',
+      source: 'broker_attached',
+      brokerRootDir: '/broker-root/.happy-vsc',
+      brokerUrl: 'ws://127.0.0.1:7777?token=broker-token',
+      brokerSessionId: 'broker-sess-1',
+      brokerWindowInstanceId: 'window-a',
+      brokerWindowLabel: 'Window A',
+      brokerWorkspaceLabel: 'Workspace A',
+      brokerWorkspacePath: '/workspace-a',
+      brokerWindowOrdinal: 1,
+      brokerWindowIsActive: true,
+      brokerWindowLastActiveAt: '2026-03-23T12:00:00.000Z',
+    }));
+    expect(discoverBrokerSessionCatalogMock).toHaveBeenCalledWith('/broker-root/.happy-vsc');
+    expect(resolveBrokerSessionAttachTargetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessions: expect.any(Array),
+      }),
+      'broker-sess-1',
+    );
   });
 
   it('rejects broker attach calls without a broker session id', async () => {
@@ -231,12 +297,30 @@ describe('ApiMachineClient broker RPCs', () => {
   });
 
   it('surfaces broker discovery failures as RPC errors', async () => {
-    discoverSessionsMock.mockRejectedValue(new Error('broker unavailable'));
+    discoverBrokerSessionCatalogMock.mockRejectedValue(new Error('broker unavailable'));
 
     const client = await createTestClient();
 
     await expect(callMachineRpc(client, 'broker-list-sessions', {}))
       .rejects
       .toThrow('broker unavailable');
+  });
+
+  it('fails attach when broker session id is duplicated across windows', async () => {
+    resolveBrokerSessionAttachTargetMock.mockImplementation(() => {
+      throw new Error(
+        'Duplicate brokerSessionId "broker-sess-1" found across broker windows',
+      );
+    });
+
+    const client = await createTestClient();
+
+    await expect(
+      callMachineRpc(client, 'broker-attach-session', {
+        brokerSessionId: 'broker-sess-1',
+      }),
+    ).rejects.toThrow(
+      'Duplicate brokerSessionId "broker-sess-1" found across broker windows',
+    );
   });
 });

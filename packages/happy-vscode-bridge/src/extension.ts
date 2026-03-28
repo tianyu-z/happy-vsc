@@ -1,6 +1,7 @@
 import { BrokerManifestStore } from './broker/BrokerManifestStore';
 import { BrokerServer, type BrokerAdapterHost } from './broker/BrokerServer';
 import { SharedSessionStore } from './broker/SharedSessionStore';
+import { basename } from 'node:path';
 import { ProviderHostRegistry } from './runtime/ProviderHostRegistry';
 import {
   installProviderRuntimeCapture,
@@ -89,6 +90,12 @@ type ActivateOptions = {
       ): { dispose(): unknown };
     };
     window?: {
+      state?: {
+        focused?: boolean;
+      };
+      onDidChangeWindowState?(
+        listener: (state: { focused: boolean }) => unknown,
+      ): { dispose(): unknown };
       createTreeView?(
         id: string,
         options: { treeDataProvider: unknown },
@@ -122,10 +129,13 @@ type ActivateOptions = {
         content: string;
         language?: string;
       }): Promise<unknown>;
-      workspaceFile?: { toString(): string } | null;
+      workspaceFile?: { toString(): string; fsPath?: string } | null;
       workspaceFolders?: Array<{
-        uri: { toString(): string };
+        uri: { toString(): string; fsPath?: string };
       }> | null;
+    };
+    env?: {
+      sessionId?: string;
     };
     Uri?: {
       parse(value: string): unknown;
@@ -171,6 +181,12 @@ async function loadVscodeHost() {
       ): { dispose(): unknown };
     };
     window: {
+      state?: {
+        focused?: boolean;
+      };
+      onDidChangeWindowState?(
+        listener: (state: { focused: boolean }) => unknown,
+      ): { dispose(): unknown };
       createTreeView(
         id: string,
         options: { treeDataProvider: unknown },
@@ -258,6 +274,48 @@ function listOpenTabs(vscode: ActivateOptions['vscode']): BridgeTabSnapshot[] {
   }
 
   return tabs;
+}
+
+type BrokerWindowManifestMetadata = {
+  windowInstanceId?: string;
+  windowLabel: string;
+  workspaceLabel: string;
+  workspacePath: string | null;
+  isActiveWindow: boolean;
+  windowLastActiveAt: string | null;
+};
+
+function labelFromPath(value: string): string {
+  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
+  const result = basename(normalized);
+  return result || normalized || 'No Workspace';
+}
+
+function resolveBrokerWindowManifestMetadata(params: {
+  vscode: ActivateOptions['vscode'];
+}): BrokerWindowManifestMetadata {
+  const workspaceFile = params.vscode?.workspace?.workspaceFile;
+  const firstWorkspaceFolder = params.vscode?.workspace?.workspaceFolders?.[0];
+  const workspacePath =
+    workspaceFile?.fsPath ?? firstWorkspaceFolder?.uri.fsPath ?? null;
+  const workspaceLabel = workspacePath
+    ? labelFromPath(workspacePath)
+    : 'No Workspace';
+  const sessionId = params.vscode?.env?.sessionId?.trim();
+  const focusedState = params.vscode?.window?.state?.focused;
+  const isActiveWindow = typeof focusedState === 'boolean' ? focusedState : false;
+
+  return {
+    windowInstanceId: sessionId?.length ? sessionId : undefined,
+    windowLabel:
+      workspaceLabel === 'No Workspace'
+        ? 'VS Code Window'
+        : `VS Code Window · ${workspaceLabel}`,
+    workspaceLabel,
+    workspacePath,
+    isActiveWindow,
+    windowLastActiveAt: isActiveWindow ? new Date().toISOString() : null,
+  };
 }
 
 function createSharedCaptureDiscoveryHost(
@@ -407,6 +465,15 @@ export async function activate(
     store,
   });
   const manifestStore = new BrokerManifestStore(context.globalStorageUri.fsPath);
+  const manifestWindowMetadata = resolveBrokerWindowManifestMetadata({
+    vscode,
+  });
+  const setManifestWindowActiveState = (isActiveWindow: boolean) => {
+    manifestWindowMetadata.isActiveWindow = isActiveWindow;
+    if (isActiveWindow) {
+      manifestWindowMetadata.windowLastActiveAt = new Date().toISOString();
+    }
+  };
   let server: BrokerServer | null = null;
 
   const startBroker = async () => {
@@ -418,6 +485,7 @@ export async function activate(
       adapterHost,
       manifestStore,
       store,
+      manifestWindowMetadata,
       token: options.token,
     });
     activeServer = server;
@@ -439,6 +507,23 @@ export async function activate(
   await startBroker();
   activeRuntime = runtime;
   activeFacade = adapterHost instanceof AdapterFacade ? adapterHost : null;
+  if (vscode.window?.onDidChangeWindowState) {
+    const windowStateSubscription = vscode.window.onDidChangeWindowState(
+      (windowState) => {
+        setManifestWindowActiveState(windowState.focused);
+        if (!server) {
+          return;
+        }
+
+        void manifestStore.write({
+          port: server.port,
+          token: server.token,
+          ...manifestWindowMetadata,
+        });
+      },
+    );
+    context.subscriptions.push(windowStateSubscription);
+  }
 
   const treeDataProvider = new BridgeSessionTreeDataProvider(runtime);
   const commandDisposables =

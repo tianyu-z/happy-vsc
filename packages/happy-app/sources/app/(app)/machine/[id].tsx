@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Item } from '@/components/Item';
 import { ItemGroup } from '@/components/ItemGroup';
 import { ItemList } from '@/components/ItemList';
+import { BrokerWindowGroupHeader } from '@/components/BrokerWindowGroupHeader';
 import { Typography } from '@/constants/Typography';
 import { useSessions, useMachine, storage } from '@/sync/storage';
 import { Ionicons, AntDesign } from '@expo/vector-icons';
@@ -18,9 +19,12 @@ import {
     getBrokerSessionAttachabilityLabel,
     getBrokerSessionAttachActionLabel,
     getBrokerSessionDegradedMessages,
+    getBrokerSessionDisabledReason,
     getBrokerSessionProviderLabel,
     getBrokerSessionRuntimeDetails,
+    getBrokerWindowHeaderSummary,
 } from '@/utils/brokerSessionUtils';
+import { groupBrokerSessionsByWindow } from '@/utils/brokerWindowGroups';
 import { formatPathRelativeToHome, getSessionName, getSessionSubtitle } from '@/utils/sessionUtils';
 import { isMachineOnline } from '@/utils/machineUtils';
 import { sync } from '@/sync/sync';
@@ -149,8 +153,8 @@ export default function MachineDetailScreen() {
             .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
             .slice(0, 5);
     }, [machineSessions]);
-    const attachableBrokerSessions = useMemo(
-        () => brokerSessions.filter((session) => canAttachBrokerSession(session)),
+    const groupedBrokerSessions = useMemo(
+        () => groupBrokerSessionsByWindow(brokerSessions),
         [brokerSessions],
     );
 
@@ -582,6 +586,47 @@ export default function MachineDetailScreen() {
         folderPickerRef.current?.present();
     }, [handleFolderSelectedForPicker]);
 
+    const renderBrokerSessionItem = useCallback((
+        brokerSession: BrokerDiscoveredSession,
+        options?: { showDivider?: boolean },
+    ) => {
+        const degradedMessages = getBrokerSessionDegradedMessages(
+            brokerSession.degradedFlags,
+            t,
+        );
+        const runtimeDetails = getBrokerSessionRuntimeDetails(brokerSession);
+        const providerLabel = getBrokerSessionProviderLabel(
+            brokerSession.provider,
+            t,
+        );
+        const attachabilityLabel = getBrokerSessionAttachabilityLabel(brokerSession, t);
+        const disabledReason = getBrokerSessionDisabledReason(brokerSession, t);
+        const subtitle = [
+            [providerLabel, attachabilityLabel].join(' • '),
+            disabledReason && disabledReason !== attachabilityLabel ? disabledReason : null,
+            ...runtimeDetails,
+            ...degradedMessages,
+        ]
+            .filter((line, index, lines) => Boolean(line) && lines.indexOf(line) === index)
+            .join('\n');
+        const isAttachable = canAttachBrokerSession(brokerSession);
+
+        return (
+            <Item
+                key={brokerSession.brokerSessionId}
+                title={brokerSession.title}
+                subtitle={subtitle}
+                subtitleLines={0}
+                onPress={isAttachable ? () => void handleAttachBroker(brokerSession) : undefined}
+                disabled={!isAttachable}
+                loading={attachingBrokerSessionId === brokerSession.brokerSessionId}
+                detail={isAttachable ? getBrokerSessionAttachActionLabel(brokerSession, t) : undefined}
+                showChevron={isAttachable}
+                showDivider={options?.showDivider}
+            />
+        );
+    }, [attachingBrokerSessionId, handleAttachBroker]);
+
     if (!machine) {
         return (
             <>
@@ -818,60 +863,77 @@ export default function MachineDetailScreen() {
                 </ItemGroup>
 
                 {machine && isMachineOnlineNow && (brokerSessionsLoaded || isLoadingBrokerSessions) && (
-                    <ItemGroup title={t('machine.brokerSessions')}>
+                    <>
                         {isLoadingBrokerSessions ? (
-                            <Item
-                                title={t('status.refreshing')}
-                                showChevron={false}
-                                loading
-                            />
+                            <ItemGroup title={t('machine.brokerSessions')}>
+                                <Item
+                                    title={t('status.refreshing')}
+                                    showChevron={false}
+                                    loading
+                                />
+                            </ItemGroup>
                         ) : brokerSessionsError ? (
-                            <Item
-                                title={t('machine.brokerSessionsUnavailable')}
-                                subtitle={brokerSessionsError}
-                                subtitleLines={0}
-                                onPress={() => void refreshBrokerSessions()}
-                                detail={t('common.retry')}
-                                showChevron={false}
-                            />
-                        ) : attachableBrokerSessions.length > 0 ? (
-                            attachableBrokerSessions.map((brokerSession, index) => {
-                                const degradedMessages = getBrokerSessionDegradedMessages(
-                                    brokerSession.degradedFlags,
-                                    t,
-                                );
-                                const runtimeDetails = getBrokerSessionRuntimeDetails(brokerSession);
-                                const providerLabel = getBrokerSessionProviderLabel(
-                                    brokerSession.provider,
-                                    t,
-                                );
-                                const subtitle = [
-                                    [providerLabel, getBrokerSessionAttachabilityLabel(brokerSession, t)].join(' • '),
-                                    ...runtimeDetails,
-                                    ...degradedMessages,
-                                ].filter((line, idx, lines) => line && lines.indexOf(line) === idx).join('\n');
-
-                                return (
-                                    <Item
-                                        key={brokerSession.brokerSessionId}
-                                        title={brokerSession.title}
-                                        subtitle={subtitle}
-                                        subtitleLines={0}
-                                        onPress={() => void handleAttachBroker(brokerSession)}
-                                        loading={attachingBrokerSessionId === brokerSession.brokerSessionId}
-                                        detail={getBrokerSessionAttachActionLabel(brokerSession, t)}
-                                        showChevron
-                                        showDivider={index < attachableBrokerSessions.length - 1}
-                                    />
-                                );
-                            })
+                            <ItemGroup title={t('machine.brokerSessions')}>
+                                <Item
+                                    title={t('machine.brokerSessionsUnavailable')}
+                                    subtitle={brokerSessionsError}
+                                    subtitleLines={0}
+                                    onPress={() => void refreshBrokerSessions()}
+                                    detail={t('common.retry')}
+                                    showChevron={false}
+                                />
+                            </ItemGroup>
+                        ) : brokerSessions.length === 0 ? (
+                            <ItemGroup title={t('machine.brokerSessions')}>
+                                <Item
+                                    title={t('machine.brokerSessionsEmpty')}
+                                    showChevron={false}
+                                />
+                            </ItemGroup>
+                        ) : groupedBrokerSessions.mode === 'grouped' ? (
+                            groupedBrokerSessions.groups.map((group, index) => (
+                                <ItemGroup
+                                    key={group.windowInstanceId}
+                                    title={(
+                                        <BrokerWindowGroupHeader
+                                            sectionTitle={index === 0 ? t('machine.brokerSessions') : undefined}
+                                            title={group.displayLabel}
+                                            summary={getBrokerWindowHeaderSummary(group, t)}
+                                        />
+                                    )}
+                                    headerStyle={index === 0 ? undefined : {
+                                        paddingTop: Platform.select({ ios: 18, default: 12 }),
+                                        paddingBottom: Platform.select({ ios: 6, default: 8 }),
+                                    }}
+                                >
+                                    {group.sessions.map((brokerSession, sessionIndex) => renderBrokerSessionItem(
+                                        brokerSession,
+                                        { showDivider: sessionIndex < group.sessions.length - 1 },
+                                    ))}
+                                </ItemGroup>
+                            ))
                         ) : (
-                            <Item
-                                title={t('machine.brokerSessionsEmpty')}
-                                showChevron={false}
-                            />
+                            <ItemGroup title={t('machine.brokerSessions')}>
+                                <Item
+                                    title={t('machine.brokerWindowGroupingUpgradeRequired')}
+                                    showChevron={false}
+                                />
+                                {groupedBrokerSessions.sessions.filter((session) => canAttachBrokerSession(session)).length > 0 ? (
+                                    groupedBrokerSessions.sessions
+                                        .filter((session) => canAttachBrokerSession(session))
+                                        .map((brokerSession, index, sessionsInFlatMode) => renderBrokerSessionItem(
+                                            brokerSession,
+                                            { showDivider: index < sessionsInFlatMode.length - 1 },
+                                        ))
+                                ) : (
+                                    <Item
+                                        title={t('machine.brokerSessionsEmpty')}
+                                        showChevron={false}
+                                    />
+                                )}
+                            </ItemGroup>
                         )}
-                    </ItemGroup>
+                    </>
                 )}
 
                 {/* Previous Sessions (debug view) */}
