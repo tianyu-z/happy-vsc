@@ -991,12 +991,13 @@ function buildClaudeBridgeDiagnostics(
 }
 
 function createClaudeTransportUserMessage(
+  providerSessionRef: string,
   text: string,
 ): ClaudeTransportUserMessage {
   return {
     type: 'user',
     uuid: randomUUID(),
-    session_id: '',
+    session_id: providerSessionRef,
     parent_tool_use_id: null,
     message: {
       role: 'user',
@@ -1726,7 +1727,7 @@ function createClaudeFactory(params: {
           await comm.transportMessage.call(
             comm,
             runtimeChannelRef,
-            createClaudeTransportUserMessage(text),
+            createClaudeTransportUserMessage(providerSessionRef, text),
             false,
           );
 

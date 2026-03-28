@@ -17,26 +17,57 @@ type BrokerRunStatus = Extract<
 
 const MAX_RECENT_USER_TEXTS = 20;
 
+type RememberedOutboundUserText = {
+  rollback: () => void;
+};
+
+type OutboundUserTextEntry = {
+  id: number;
+  normalizedText: string;
+};
+
+function normalizeUserText(text: string): string {
+  return text.replace(/\r\n/g, '\n').trim();
+}
+
 export class BrokerEventProjector {
   private readonly session: BrokerEventProjectorSession;
-  private readonly recentOutboundUserTexts: string[] = [];
+  private readonly recentOutboundUserTexts: OutboundUserTextEntry[] = [];
   private readonly pendingApprovals = new Set<string>();
   private lastRunStatus: BrokerRunStatus | null = null;
   private provider: BrokerProvider;
+  private nextOutboundUserTextId = 1;
 
   constructor(session: BrokerEventProjectorSession, provider: BrokerProvider = 'claude') {
     this.session = session;
     this.provider = provider;
   }
 
-  rememberOutboundUserText(text: string): void {
-    if (!text) {
-      return;
+  rememberOutboundUserText(text: string): RememberedOutboundUserText {
+    const normalizedText = normalizeUserText(text);
+    if (!normalizedText) {
+      return {
+        rollback: () => {},
+      };
     }
-    this.recentOutboundUserTexts.push(text);
+
+    const entry: OutboundUserTextEntry = {
+      id: this.nextOutboundUserTextId++,
+      normalizedText,
+    };
+    this.recentOutboundUserTexts.push(entry);
     if (this.recentOutboundUserTexts.length > MAX_RECENT_USER_TEXTS) {
       this.recentOutboundUserTexts.splice(0, this.recentOutboundUserTexts.length - MAX_RECENT_USER_TEXTS);
     }
+
+    return {
+      rollback: () => {
+        const index = this.recentOutboundUserTexts.findIndex((candidate) => candidate.id === entry.id);
+        if (index !== -1) {
+          this.recentOutboundUserTexts.splice(index, 1);
+        }
+      },
+    };
   }
 
   applyEvent(event: BrokerEvent): void {
@@ -88,7 +119,14 @@ export class BrokerEventProjector {
   }
 
   private shouldSuppressUserEcho(text: string): boolean {
-    const index = this.recentOutboundUserTexts.indexOf(text);
+    const normalizedText = normalizeUserText(text);
+    if (!normalizedText) {
+      return false;
+    }
+
+    const index = this.recentOutboundUserTexts.findIndex(
+      (entry) => entry.normalizedText === normalizedText,
+    );
     if (index === -1) {
       return false;
     }

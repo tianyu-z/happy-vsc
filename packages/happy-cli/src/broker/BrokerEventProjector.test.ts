@@ -26,9 +26,10 @@ describe('BrokerEventProjector', () => {
 
   it('suppresses user echoes that match outbound text', () => {
     const sendAgentMessage = vi.fn();
+    const sendUserTextMessage = vi.fn();
     const projector = new BrokerEventProjector({
       sendAgentMessage,
-      sendUserTextMessage: vi.fn(),
+      sendUserTextMessage,
       keepAlive: vi.fn(),
       updateAgentState: vi.fn(),
     });
@@ -41,6 +42,26 @@ describe('BrokerEventProjector', () => {
     });
 
     expect(sendAgentMessage).not.toHaveBeenCalled();
+    expect(sendUserTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('suppresses user echoes that only differ by surrounding whitespace', () => {
+    const sendUserTextMessage = vi.fn();
+    const projector = new BrokerEventProjector({
+      sendAgentMessage: vi.fn(),
+      sendUserTextMessage,
+      keepAlive: vi.fn(),
+      updateAgentState: vi.fn(),
+    });
+
+    projector.rememberOutboundUserText('who trained you');
+    projector.applyEvent({
+      type: 'session.message.delta',
+      brokerSessionId: 'broker-sess-1',
+      payload: { role: 'user', text: '  who trained you\n' },
+    });
+
+    expect(sendUserTextMessage).not.toHaveBeenCalled();
   });
 
   it('projects external user deltas into Happy user messages', () => {

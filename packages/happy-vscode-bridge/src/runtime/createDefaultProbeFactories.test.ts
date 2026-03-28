@@ -1084,7 +1084,7 @@ describe('createDefaultProbeFactories', () => {
       {
         type: 'user',
         uuid: expect.any(String),
-        session_id: '',
+        session_id: '98774e08-0c03-4d72-89cb-6a29ba6ae93a',
         parent_tool_use_id: null,
         message: {
           role: 'user',

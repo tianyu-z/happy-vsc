@@ -250,9 +250,15 @@ export class BrokerRelayRunner {
       return;
     }
 
-    const sent = await this.options.brokerClient.sendMessage(this.requireBrokerSessionId(), text);
-    if (sent) {
-      this.projector.rememberOutboundUserText(text);
+    const rememberedUserText = this.projector.rememberOutboundUserText(text);
+    try {
+      const sent = await this.options.brokerClient.sendMessage(this.requireBrokerSessionId(), text);
+      if (!sent) {
+        rememberedUserText.rollback();
+      }
+    } catch (error) {
+      rememberedUserText.rollback();
+      throw error;
     }
   }
 

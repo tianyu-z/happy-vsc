@@ -56,6 +56,200 @@ function createFakeSession(sessionId: string) {
 }
 
 describe('BrokerRelayRunner', () => {
+  it('suppresses a broker user echo that arrives before sendMessage resolves', async () => {
+    const sessionRef = createFakeSession('happy-session-1');
+    let onEvent: ((entry: any) => void) | undefined;
+    let resolveSendMessage: ((value: boolean) => void) | undefined;
+    const sendMessage = vi.fn().mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSendMessage = resolve;
+        }),
+    );
+
+    const runner = new BrokerRelayRunner({
+      api: {
+        getOrCreateMachine: vi.fn().mockResolvedValue({}),
+        getOrCreateSession: vi.fn().mockResolvedValue({ id: 'happy-session-1' }),
+      } as any,
+      brokerClient: {
+        attachSession: vi.fn().mockResolvedValue({
+          brokerSessionId: 'broker-sess-1',
+          provider: 'codex',
+          latestSeq: 1,
+          capabilities: ['sendUserMessage', 'interrupt'],
+          degradedFlags: [],
+          desiredMode: 'runtime_preferred',
+          effectiveMode: 'runtime',
+          modeReason: 'runtime_ready',
+          compatibility: 'supported',
+          providerExtension: {
+            id: 'openai.chatgpt',
+            version: '1.0.0',
+          },
+          probeHealth: {
+            runtime: 'ready',
+            storage: 'ready',
+          },
+        }),
+        sendMessage,
+        interruptSession: vi.fn().mockResolvedValue(true),
+        resolveApproval: vi.fn().mockResolvedValue(true),
+      } as any,
+      brokerEventStream: {
+        subscribeEvents: vi.fn().mockImplementation(async (_brokerSessionId, next) => {
+          onEvent = next;
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      },
+      machineId: 'machine-1',
+      machineMetadata: {
+        host: 'localhost',
+        platform: 'darwin',
+        happyCliVersion: '0.0.0-test',
+        homeDir: '/tmp',
+        happyHomeDir: '/tmp/.happy',
+        happyLibDir: '/tmp/.happy/lib',
+      },
+      brokerSessionId: 'broker-sess-1',
+      brokerWindowInstanceId: 'window-a',
+      brokerWindowLabel: 'Window A',
+      brokerWorkspaceLabel: 'Workspace A',
+      brokerWorkspacePath: '/workspace-a',
+      brokerWindowOrdinal: 1,
+      setupOfflineReconnection: vi.fn().mockReturnValue({
+        session: sessionRef.session,
+        reconnectionHandle: null,
+        isOffline: false,
+      }),
+    });
+
+    const startPromise = runner.start();
+    await vi.waitFor(() => {
+      expect(onEvent).toBeTypeOf('function');
+    });
+
+    const emitPromise = sessionRef.emitUserMessage({
+      role: 'user',
+      content: { type: 'text', text: 'who trained you' },
+    });
+
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith('broker-sess-1', 'who trained you');
+      expect(resolveSendMessage).toBeTypeOf('function');
+    });
+
+    onEvent?.({
+      seq: 2,
+      at: 456,
+      sessionId: 'broker-sess-1',
+      event: {
+        type: 'session.message.delta',
+        brokerSessionId: 'broker-sess-1',
+        payload: { role: 'user', text: 'who trained you' },
+      },
+    });
+
+    expect(sessionRef.session.sendUserTextMessage).not.toHaveBeenCalled();
+
+    resolveSendMessage?.(true);
+    await emitPromise;
+
+    await runner.stop();
+    await startPromise;
+  });
+
+  it('does not suppress later external user input when sendMessage fails', async () => {
+    const sessionRef = createFakeSession('happy-session-1');
+    let onEvent: ((entry: any) => void) | undefined;
+    const sendMessage = vi.fn().mockRejectedValue(new Error('send failed'));
+
+    const runner = new BrokerRelayRunner({
+      api: {
+        getOrCreateMachine: vi.fn().mockResolvedValue({}),
+        getOrCreateSession: vi.fn().mockResolvedValue({ id: 'happy-session-1' }),
+      } as any,
+      brokerClient: {
+        attachSession: vi.fn().mockResolvedValue({
+          brokerSessionId: 'broker-sess-1',
+          provider: 'codex',
+          latestSeq: 1,
+          capabilities: ['sendUserMessage', 'interrupt'],
+          degradedFlags: [],
+          desiredMode: 'runtime_preferred',
+          effectiveMode: 'runtime',
+          modeReason: 'runtime_ready',
+          compatibility: 'supported',
+          providerExtension: {
+            id: 'openai.chatgpt',
+            version: '1.0.0',
+          },
+          probeHealth: {
+            runtime: 'ready',
+            storage: 'ready',
+          },
+        }),
+        sendMessage,
+        interruptSession: vi.fn().mockResolvedValue(true),
+        resolveApproval: vi.fn().mockResolvedValue(true),
+      } as any,
+      brokerEventStream: {
+        subscribeEvents: vi.fn().mockImplementation(async (_brokerSessionId, next) => {
+          onEvent = next;
+        }),
+        close: vi.fn().mockResolvedValue(undefined),
+      },
+      machineId: 'machine-1',
+      machineMetadata: {
+        host: 'localhost',
+        platform: 'darwin',
+        happyCliVersion: '0.0.0-test',
+        homeDir: '/tmp',
+        happyHomeDir: '/tmp/.happy',
+        happyLibDir: '/tmp/.happy/lib',
+      },
+      brokerSessionId: 'broker-sess-1',
+      brokerWindowInstanceId: 'window-a',
+      brokerWindowLabel: 'Window A',
+      brokerWorkspaceLabel: 'Workspace A',
+      brokerWorkspacePath: '/workspace-a',
+      brokerWindowOrdinal: 1,
+      setupOfflineReconnection: vi.fn().mockReturnValue({
+        session: sessionRef.session,
+        reconnectionHandle: null,
+        isOffline: false,
+      }),
+    });
+
+    const startPromise = runner.start();
+    await vi.waitFor(() => {
+      expect(onEvent).toBeTypeOf('function');
+    });
+
+    await expect(
+      sessionRef.emitUserMessage({
+        role: 'user',
+        content: { type: 'text', text: 'who trained you' },
+      }),
+    ).rejects.toThrow('send failed');
+
+    onEvent?.({
+      seq: 2,
+      at: 456,
+      sessionId: 'broker-sess-1',
+      event: {
+        type: 'session.message.delta',
+        brokerSessionId: 'broker-sess-1',
+        payload: { role: 'user', text: 'who trained you' },
+      },
+    });
+
+    expect(sessionRef.session.sendUserTextMessage).toHaveBeenCalledWith('who trained you');
+
+    await runner.stop();
+    await startPromise;
+  });
+
   it('backfills Claude attach history through the live session when runtime refs are available', async () => {
     vi.clearAllMocks();
 

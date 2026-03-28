@@ -111,7 +111,8 @@ export class ApiSessionClient extends EventEmitter {
     private agentStateVersion: number;
     private socket: Socket<ServerToClientEvents, ClientToServerEvents>;
     private pendingMessages: UserMessage[] = [];
-    private pendingMessageCallback: ((message: UserMessage) => void) | null = null;
+    private pendingMessageCallback: ((message: UserMessage) => void | Promise<void>) | null = null;
+    private pendingMessageDelivery: Promise<void> = Promise.resolve();
     readonly rpcHandlerManager: RpcHandlerManager;
     private agentStateLock = new AsyncLock();
     private metadataLock = new AsyncLock();
@@ -206,16 +207,14 @@ export class ApiSessionClient extends EventEmitter {
                     content: { type: 'text' as const, text },
                     meta: {},
                 };
-                if (this.pendingMessageCallback) {
-                    this.pendingMessageCallback(syntheticMessage as any);
-                } else {
-                    this.pendingMessages.push(syntheticMessage as any);
-                }
+                void this.dispatchUserMessage(syntheticMessage as any).catch((error) => {
+                    logger.debug('[SOCKET] [UPDATE] [ERROR] Error delivering orchestrator callback', { error });
+                });
             }
         });
 
         // Server events
-        this.socket.on('update', (data: Update) => {
+        this.socket.on('update', async (data: Update) => {
             const emitMessageReceipt = (params: { sid: string; messageId: string; localId: string | null; ok: boolean; error?: string }) => {
                 this.socket.emit('message-receipt', {
                     sid: params.sid,
@@ -249,7 +248,7 @@ export class ApiSessionClient extends EventEmitter {
                         if (userResult.data.meta?.sentFrom === 'cli') {
                             logger.debug('[SOCKET] [UPDATE] Ignoring echo of CLI-originated user message');
                         } else if (this.pendingMessageCallback) {
-                            this.pendingMessageCallback(userResult.data);
+                            await this.dispatchUserMessage(userResult.data);
                             emitMessageReceipt({
                                 sid: data.body.sid,
                                 messageId: data.body.message.id,
@@ -409,10 +408,25 @@ export class ApiSessionClient extends EventEmitter {
         return response.data;
     }
 
-    onUserMessage(callback: (data: UserMessage) => void) {
+    private dispatchUserMessage(message: UserMessage): Promise<void> {
+        if (!this.pendingMessageCallback) {
+            this.pendingMessages.push(message);
+            return Promise.resolve();
+        }
+
+        const callback = this.pendingMessageCallback;
+        const delivery = this.pendingMessageDelivery.then(() => callback(message));
+        this.pendingMessageDelivery = delivery.catch(() => {});
+        return delivery;
+    }
+
+    onUserMessage(callback: (data: UserMessage) => void | Promise<void>) {
         this.pendingMessageCallback = callback;
-        while (this.pendingMessages.length > 0) {
-            callback(this.pendingMessages.shift()!);
+        const queuedMessages = this.pendingMessages.splice(0);
+        for (const message of queuedMessages) {
+            void this.dispatchUserMessage(message).catch((error) => {
+                logger.debug('[SOCKET] [UPDATE] [ERROR] Error delivering queued user message', { error });
+            });
         }
     }
 

@@ -385,6 +385,41 @@ describe('ApiSessionClient message receipt', () => {
         });
     });
 
+    it('emits message-receipt ok=false when onUserMessage callback rejects', async () => {
+        const client = new ApiSessionClient('fake-token', mockSession);
+        client.onUserMessage(async () => {
+            throw new Error('broker send failed');
+        });
+
+        vi.spyOn(encryptionModule, 'decodeBase64').mockReturnValue(new Uint8Array([1, 2, 3]));
+        vi.spyOn(encryptionModule, 'decrypt').mockReturnValue({
+            role: 'user',
+            content: { type: 'text', text: 'hello' },
+            meta: { sentFrom: 'web' }
+        } as any);
+
+        const updateHandler = getUpdateHandler();
+        await updateHandler({
+            body: {
+                t: 'new-message',
+                sid: 'test-session-id',
+                message: {
+                    id: 'msg-1',
+                    localId: 'local-1',
+                    content: { t: 'encrypted', c: 'abc' }
+                }
+            }
+        });
+
+        expect(mockSocket.emit).toHaveBeenCalledWith('message-receipt', {
+            sid: 'test-session-id',
+            messageId: 'msg-1',
+            localId: 'local-1',
+            ok: false,
+            error: 'broker send failed'
+        });
+    });
+
     it('emits message-receipt ok=false with original error on decrypt/parse failure', () => {
         new ApiSessionClient('fake-token', mockSession);
 
