@@ -1,7 +1,11 @@
 import fastify from "fastify";
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from "fastify-type-provider-zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __resetSessionTurnRuntimeForTests, markTurnStarted } from "@/app/presence/sessionTurnRuntime";
+import {
+    __resetSessionTurnRuntimeForTests,
+    markTurnStarted,
+    updateThinkingState,
+} from "@/app/presence/sessionTurnRuntime";
 import { type Fastify } from "../types";
 
 type SessionRecord = {
@@ -1175,6 +1179,88 @@ describe("v3SessionRoutes", () => {
         expect(state.messages).toHaveLength(0);
         expect(state.pendingMessages).toHaveLength(1);
         expect(state.pendingMessages[0].localId).toBe("queued-by-thinking");
+    });
+
+    it("routes /send to sent mode after stale awaiting-turn-start expires", async () => {
+        const initialNow = Date.parse("2026-03-28T00:00:00.000Z");
+        let currentNow = initialNow;
+        const dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => currentNow);
+
+        try {
+            seedSession({ id: "session-1", accountId: "user-1", seq: 0 });
+            app = await createApp();
+
+            const firstResponse = await app.inject({
+                method: "POST",
+                url: "/v3/sessions/session-1/send",
+                headers: { "x-user-id": "user-1" },
+                payload: {
+                    localId: "direct-send-1",
+                    content: "enc-content-direct-1",
+                    trackCliDelivery: false,
+                },
+            });
+
+            expect(firstResponse.statusCode).toBe(200);
+            expect(firstResponse.json().mode).toBe("sent");
+
+            currentNow = initialNow + 31_000;
+
+            const secondResponse = await app.inject({
+                method: "POST",
+                url: "/v3/sessions/session-1/send",
+                headers: { "x-user-id": "user-1" },
+                payload: {
+                    localId: "direct-send-2",
+                    content: "enc-content-direct-2",
+                    trackCliDelivery: false,
+                },
+            });
+
+            expect(secondResponse.statusCode).toBe(200);
+            expect(secondResponse.json().mode).toBe("sent");
+            expect(state.pendingMessages).toHaveLength(0);
+            expect(state.messages.map((message) => message.localId)).toEqual([
+                "direct-send-1",
+                "direct-send-2",
+            ]);
+        } finally {
+            dateNowSpy.mockRestore();
+        }
+    });
+
+    it("routes /send to sent mode after stale thinking heartbeat expires", async () => {
+        const initialNow = Date.parse("2026-03-28T00:00:00.000Z");
+        let currentNow = initialNow;
+        const dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => currentNow);
+
+        try {
+            seedSession({ id: "session-1", accountId: "user-1", seq: 0 });
+            updateThinkingState("session-1", true, initialNow);
+            app = await createApp();
+
+            currentNow = initialNow + 31_000;
+
+            const response = await app.inject({
+                method: "POST",
+                url: "/v3/sessions/session-1/send",
+                headers: { "x-user-id": "user-1" },
+                payload: {
+                    localId: "direct-after-stale-thinking",
+                    content: "enc-content-direct-after-stale-thinking",
+                    trackCliDelivery: false,
+                },
+            });
+
+            expect(response.statusCode).toBe(200);
+            expect(response.json().mode).toBe("sent");
+            expect(state.pendingMessages).toHaveLength(0);
+            expect(state.messages.map((message) => message.localId)).toEqual([
+                "direct-after-stale-thinking",
+            ]);
+        } finally {
+            dateNowSpy.mockRestore();
+        }
     });
 
     it("send-now dispatches target pending message and keeps others", async () => {

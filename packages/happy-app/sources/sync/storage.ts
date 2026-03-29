@@ -35,6 +35,7 @@ import {
     sortPendingQueue,
     upsertPendingMessageInQueue,
 } from "./pendingQueue";
+import { mergeSessionActivity } from "./sessionActivityMerge";
 
 // Debounce timer for realtimeMode changes
 let realtimeModeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -486,9 +487,6 @@ export const storage = create<StorageState>()((set, get) => {
 
             // Update sessions with calculated presence using centralized resolver
             sessions.forEach(session => {
-                // Use centralized resolver for consistent state management
-                const presence = resolveSessionOnlineState(session);
-
                 // Get existing session for version comparison
                 const existing = state.sessions[session.id];
 
@@ -512,19 +510,18 @@ export const storage = create<StorageState>()((set, get) => {
                 if (isPendingArchive && !session.active) {
                     pendingArchiveSessionIds.delete(session.id);
                 }
-                const resolvedActive = (isPendingArchive && existing && !existing.active && session.active)
-                    ? false
-                    : session.active;
-                const isPreservingArchive = resolvedActive !== session.active;
-                const resolvedPresence = isPreservingArchive
-                    ? resolveSessionOnlineState({ active: false, activeAt: existing!.activeAt })
-                    : presence;
+                const mergedActivity = mergeSessionActivity(
+                    existing ? { active: existing.active, activeAt: existing.activeAt } : undefined,
+                    session,
+                    { preserveLocalInactive: isPendingArchive }
+                );
+                const resolvedActive = mergedActivity.active;
+                const resolvedPresence = resolveSessionOnlineState(mergedActivity);
 
                 const mergedSession: Session = {
                     ...session,
-                    // Preserve optimistic archive state
                     active: resolvedActive,
-                    activeAt: isPreservingArchive ? existing!.activeAt : session.activeAt,
+                    activeAt: mergedActivity.activeAt,
                     // Use existing metadata/agentState if their versions are higher
                     metadata: useExistingMetadata ? existing.metadata : session.metadata,
                     metadataVersion: useExistingMetadata ? existing.metadataVersion : session.metadataVersion,

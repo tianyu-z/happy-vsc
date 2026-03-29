@@ -180,6 +180,13 @@ const noCancellationToken: CancellationTokenLike = {
   isCancellationRequested: false,
   onCancellationRequested: () => emptyCancellationSubscription,
 };
+const recoverableCapturedRuntimeSendErrorCodes = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+]);
 
 type ClaudeLogRequest = {
   type?: string;
@@ -198,6 +205,7 @@ type ClaudeLogEnvelope = {
 type ClaudeCapturedComm = {
   channels?: {
     has?(ref: string): boolean;
+    keys?(): Iterable<unknown>;
   };
   interruptClaude?: (ref: string) => Promise<void>;
   transportMessage?: (
@@ -206,10 +214,22 @@ type ClaudeCapturedComm = {
     done: boolean,
   ) => Promise<void> | void;
   listSessions?: () => Promise<unknown> | unknown;
+  panelTab?: unknown;
+  send?: (
+    message: {
+      type: 'io_message';
+      channelId: string;
+      message: ClaudeTransportUserMessage;
+      done: boolean;
+    },
+  ) => unknown;
 };
 
 type ClaudeCapturedProvider = {
   allComms?: Iterable<unknown>;
+  sessionPanels?: {
+    get?(sessionId: string): unknown;
+  };
   sessionStates?: Iterable<unknown> | {
     values?(): Iterable<unknown>;
   };
@@ -245,6 +265,11 @@ type ClaudeInterruptBridgeInspection = {
   comm: ClaudeCapturedComm | null;
 };
 
+type ClaudeCapturedTransportTarget = {
+  comm: ClaudeCapturedComm;
+  runtimeChannelRef: string;
+};
+
 type ClaudeTransportUserMessage = {
   type: 'user';
   uuid: string;
@@ -255,6 +280,31 @@ type ClaudeTransportUserMessage = {
     content: string;
   };
 };
+
+function isRecoverableCapturedRuntimeSendError(error: unknown): boolean {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof (error as { code?: unknown }).code === 'string'
+  ) {
+    return recoverableCapturedRuntimeSendErrorCodes.has(
+      (error as { code: string }).code,
+    );
+  }
+
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('econnrefused') ||
+    message.includes('connection refused') ||
+    message.includes('socket hang up') ||
+    message.includes('timed out')
+  );
+}
 
 export function resolveExthostLogDir(
   extensionLogPath: string | undefined,
@@ -916,6 +966,99 @@ function findClaudeCommByRuntimeChannel(
   }
 
   return null;
+}
+
+function getClaudeCommRuntimeChannelRef(
+  comm: ClaudeCapturedComm,
+): string | null {
+  const keys = comm.channels?.keys;
+  if (typeof keys !== 'function') {
+    return null;
+  }
+
+  let candidates: Iterable<unknown>;
+  try {
+    candidates = keys.call(comm.channels);
+  } catch {
+    return null;
+  }
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') {
+      continue;
+    }
+
+    const runtimeChannelRef = candidate.trim();
+    if (runtimeChannelRef.length > 0) {
+      return runtimeChannelRef;
+    }
+  }
+
+  return null;
+}
+
+function findClaudeTransportTargetBySessionPanel(
+  providerCapture: unknown,
+  providerSessionRef: string,
+): ClaudeCapturedTransportTarget | null {
+  const capturedProvider =
+    providerCapture as ClaudeCapturedProvider | null | undefined;
+  const sessionPanels = capturedProvider?.sessionPanels;
+  const allComms = capturedProvider?.allComms;
+  if (!sessionPanels || typeof sessionPanels.get !== 'function' || !allComms) {
+    return null;
+  }
+
+  let sessionPanel: unknown;
+  try {
+    sessionPanel = sessionPanels.get(providerSessionRef);
+  } catch {
+    return null;
+  }
+
+  if (!sessionPanel) {
+    return null;
+  }
+
+  for (const candidate of allComms) {
+    const comm = candidate as ClaudeCapturedComm;
+    if (comm.panelTab !== sessionPanel) {
+      continue;
+    }
+
+    const runtimeChannelRef = getClaudeCommRuntimeChannelRef(comm);
+    if (!runtimeChannelRef) {
+      continue;
+    }
+
+    return {
+      comm,
+      runtimeChannelRef,
+    };
+  }
+
+  return null;
+}
+
+function mirrorClaudeUserMessageToCapturedUi(
+  target: ClaudeCapturedTransportTarget | null,
+  providerSessionRef: string,
+  text: string,
+): void {
+  if (!target || typeof target.comm.send !== 'function') {
+    return;
+  }
+
+  try {
+    target.comm.send({
+      type: 'io_message',
+      channelId: target.runtimeChannelRef,
+      message: createClaudeTransportUserMessage(providerSessionRef, text),
+      done: false,
+    });
+  } catch {
+    // UI mirroring is best-effort; the transport has already succeeded.
+  }
 }
 
 function inspectClaudeInterruptBridge(
@@ -1713,25 +1856,73 @@ function createClaudeFactory(params: {
           }
 
           if (!runtimeChannelRef) {
-            return false;
+            await listSessions();
+            runtimeChannelRef = runtimeChannelRefs.get(providerSessionRef);
           }
 
-          const comm = findClaudeCommByRuntimeChannel(
+          const transportTargets: ClaudeCapturedTransportTarget[] = [];
+          const directComm = findClaudeCommByRuntimeChannel(
             capturedClaudeProvider,
             runtimeChannelRef,
           );
-          if (!comm || typeof comm.transportMessage !== 'function') {
-            return false;
+          if (directComm && runtimeChannelRef) {
+            transportTargets.push({
+              comm: directComm,
+              runtimeChannelRef,
+            });
           }
 
-          await comm.transportMessage.call(
-            comm,
-            runtimeChannelRef,
-            createClaudeTransportUserMessage(providerSessionRef, text),
-            false,
+          const panelTarget = findClaudeTransportTargetBySessionPanel(
+            capturedClaudeProvider,
+            providerSessionRef,
           );
+          if (
+            panelTarget &&
+            !transportTargets.some(
+              (target) =>
+                target.comm === panelTarget.comm ||
+                target.runtimeChannelRef === panelTarget.runtimeChannelRef,
+            )
+          ) {
+            transportTargets.push(panelTarget);
+          }
 
-          return true;
+          let lastRecoverableError: unknown = null;
+
+          for (const target of transportTargets) {
+            if (typeof target.comm.transportMessage !== 'function') {
+              continue;
+            }
+
+            try {
+              await target.comm.transportMessage.call(
+                target.comm,
+                target.runtimeChannelRef,
+                createClaudeTransportUserMessage(providerSessionRef, text),
+                false,
+              );
+
+              mirrorClaudeUserMessageToCapturedUi(
+                panelTarget ?? target,
+                providerSessionRef,
+                text,
+              );
+
+              return true;
+            } catch (error) {
+              if (!isRecoverableCapturedRuntimeSendError(error)) {
+                throw error;
+              }
+
+              lastRecoverableError = error;
+            }
+          }
+
+          if (lastRecoverableError) {
+            throw lastRecoverableError;
+          }
+
+          return false;
         }
       : undefined;
 
@@ -1893,14 +2084,21 @@ function createClaudeFactory(params: {
       },
       watchSession,
       sendMessage: async (providerSessionRef, text) => {
-        if (
-          sendMessageViaCapturedLiveChannel &&
-          await sendMessageViaCapturedLiveChannel(
-            providerSessionRef,
-            text,
-          )
-        ) {
-          return;
+        if (sendMessageViaCapturedLiveChannel) {
+          try {
+            if (
+              await sendMessageViaCapturedLiveChannel(
+                providerSessionRef,
+                text,
+              )
+            ) {
+              return;
+            }
+          } catch (error) {
+            if (!isRecoverableCapturedRuntimeSendError(error)) {
+              throw error;
+            }
+          }
         }
 
         await params.commandExecutor!(

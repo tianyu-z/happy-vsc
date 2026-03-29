@@ -285,7 +285,7 @@ describe("sessionUpdateHandler session-alive auto-dispatch", () => {
         const { socket, trigger } = createSocket();
         sessionUpdateHandler("user-1", socket, createConnection(socket));
 
-        const baseTime = Date.now();
+        const baseTime = Date.now() - 60_000;
         await trigger("session-alive", { sid: "session-1", time: baseTime, thinking: true });
         await trigger("session-alive", { sid: "session-1", time: baseTime + 1, thinking: false });
         await trigger("session-alive", { sid: "session-1", time: baseTime + 2, thinking: false });
@@ -303,12 +303,40 @@ describe("sessionUpdateHandler session-alive auto-dispatch", () => {
         const { socket, trigger } = createSocket();
         sessionUpdateHandler("user-1", socket, createConnection(socket));
 
-        const baseTime = Date.now();
+        const baseTime = Date.now() - 60_000;
         await trigger("session-alive", { sid: "session-1", time: baseTime, thinking: true });
         await trigger("session-alive", { sid: "session-1", time: baseTime + 1, thinking: false });
         await trigger("session-alive", { sid: "session-1", time: baseTime + 2, thinking: true });
         await trigger("session-alive", { sid: "session-1", time: baseTime + 3, thinking: false });
 
         expect(dispatchNextPendingIfPossibleMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("dispatches on the first idle heartbeat and after a stale idle gap", async () => {
+        state.sessions.push({ id: "session-1", accountId: "user-1" });
+
+        const { socket, trigger } = createSocket();
+        sessionUpdateHandler("user-1", socket, createConnection(socket));
+
+        const baseTime = Date.now() - 60_000;
+        await trigger("session-alive", { sid: "session-1", time: baseTime, thinking: false });
+
+        expect(dispatchNextPendingIfPossibleMock).toHaveBeenCalledTimes(1);
+        expect(dispatchNextPendingIfPossibleMock).toHaveBeenLastCalledWith({
+            ownerId: "user-1",
+            sessionId: "session-1",
+        });
+
+        dispatchNextPendingIfPossibleMock.mockClear();
+
+        await trigger("session-alive", { sid: "session-1", time: baseTime + 2_000, thinking: false });
+        expect(dispatchNextPendingIfPossibleMock).not.toHaveBeenCalled();
+
+        await trigger("session-alive", { sid: "session-1", time: baseTime + 15_000, thinking: false });
+        expect(dispatchNextPendingIfPossibleMock).toHaveBeenCalledTimes(1);
+        expect(dispatchNextPendingIfPossibleMock).toHaveBeenLastCalledWith({
+            ownerId: "user-1",
+            sessionId: "session-1",
+        });
     });
 });

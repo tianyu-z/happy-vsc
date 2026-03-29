@@ -18,7 +18,11 @@ import { writeDaemonState, DaemonLocallyPersistedState, readDaemonState, acquire
 import { cleanupDaemonState, isDaemonRunningCurrentlyInstalledHappyVersion, stopDaemon } from './controlClient';
 import { startDaemonControlServer } from './controlServer';
 import { buildBrokerAttachArgs } from './brokerAttachArgs';
-import { findReusableBrokerSession } from './brokerSessionReuse';
+import {
+  findConflictingBrokerSessions,
+  findReusableBrokerSession,
+} from './brokerSessionReuse';
+import { cleanupOrphanedDaemonBrokerAttachedProcesses } from './orphanedBrokerAttach';
 import { buildSpawnEnvironment, waitForSessionWebhook } from './sessionStartup';
 import { readFileSync } from 'fs';
 import { execSync, exec, type ChildProcess } from 'child_process';
@@ -172,6 +176,20 @@ export async function startDaemon(): Promise<void> {
   // 2. Should not have another daemon process running
 
   try {
+    const orphanedBrokerAttachCleanup =
+      await cleanupOrphanedDaemonBrokerAttachedProcesses();
+    if (orphanedBrokerAttachCleanup.attempted.length > 0) {
+      logger.debug(
+        `[DAEMON RUN] Cleaned up ${orphanedBrokerAttachCleanup.killed.length}/${orphanedBrokerAttachCleanup.attempted.length} orphaned broker-attached daemon session(s)`,
+      );
+      if (orphanedBrokerAttachCleanup.failed.length > 0) {
+        logger.debug(
+          '[DAEMON RUN] Failed orphaned broker-attached cleanups:',
+          orphanedBrokerAttachCleanup.failed,
+        );
+      }
+    }
+
     // Start caffeinate
     const caffeinateStarted = startCaffeinate();
     if (caffeinateStarted) {
@@ -191,6 +209,25 @@ export async function startDaemon(): Promise<void> {
 
     // Helper functions
     const getCurrentChildren = () => Array.from(pidToTrackedSession.values());
+    const terminateTrackedSession = (
+      pid: number,
+      session: TrackedSession,
+      reason: string,
+    ) => {
+      logger.debug(`[DAEMON RUN] Terminating tracked session PID ${pid}: ${reason}`);
+
+      try {
+        if (session.startedBy === 'daemon' && session.childProcess) {
+          session.childProcess.kill('SIGTERM');
+        } else {
+          process.kill(pid, 'SIGTERM');
+        }
+      } catch (error) {
+        logger.debug(`[DAEMON RUN] Failed to terminate tracked session PID ${pid}`, error);
+      }
+
+      pidToTrackedSession.delete(pid);
+    };
 
     type ManagedOrchestratorExecution = {
       payload: OrchestratorDispatchPayload;
@@ -649,9 +686,25 @@ export async function startDaemon(): Promise<void> {
             errorMessage: 'brokerSessionId is required for broker_attached sessions',
           };
         }
+        const brokerSessionTarget = {
+          brokerSessionId: options.brokerSessionId,
+          brokerUrl: options.brokerUrl,
+          brokerWindowInstanceId: options.brokerWindowInstanceId,
+        };
+        const conflictingSessions = findConflictingBrokerSessions(
+          pidToTrackedSession,
+          brokerSessionTarget,
+        );
+        for (const conflictingSession of conflictingSessions) {
+          terminateTrackedSession(
+            conflictingSession.pid,
+            conflictingSession,
+            `stale broker identity for ${options.brokerSessionId}`,
+          );
+        }
         const reusableSession = findReusableBrokerSession(
           pidToTrackedSession,
-          options.brokerSessionId,
+          brokerSessionTarget,
         );
         if (reusableSession?.happySessionId) {
           return {
@@ -694,6 +747,8 @@ export async function startDaemon(): Promise<void> {
           startedBy: 'daemon',
           source: 'broker_attached',
           brokerSessionId: options.brokerSessionId,
+          brokerUrl: options.brokerUrl,
+          brokerWindowInstanceId: options.brokerWindowInstanceId,
           pid: brokerAttachProcess.pid,
           childProcess: brokerAttachProcess,
         };
@@ -1022,25 +1077,7 @@ export async function startDaemon(): Promise<void> {
       for (const [pid, session] of pidToTrackedSession.entries()) {
         if (session.happySessionId === sessionId ||
           (sessionId.startsWith('PID-') && pid === parseInt(sessionId.replace('PID-', '')))) {
-
-          if (session.startedBy === 'daemon' && session.childProcess) {
-            try {
-              session.childProcess.kill('SIGTERM');
-              logger.debug(`[DAEMON RUN] Sent SIGTERM to daemon-spawned session ${sessionId}`);
-            } catch (error) {
-              logger.debug(`[DAEMON RUN] Failed to kill session ${sessionId}:`, error);
-            }
-          } else {
-            // For externally started sessions, try to kill by PID
-            try {
-              process.kill(pid, 'SIGTERM');
-              logger.debug(`[DAEMON RUN] Sent SIGTERM to external session PID ${pid}`);
-            } catch (error) {
-              logger.debug(`[DAEMON RUN] Failed to kill external session PID ${pid}:`, error);
-            }
-          }
-
-          pidToTrackedSession.delete(pid);
+          terminateTrackedSession(pid, session, `stopSession(${sessionId})`);
           logger.debug(`[DAEMON RUN] Removed session ${sessionId} from tracking`);
           return true;
         }

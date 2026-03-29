@@ -24,8 +24,6 @@ const mockTheme = {
         surfaceHighest: '#fafafa',
         text: '#111',
         textSecondary: '#666',
-        textDestructive: '#c00',
-        success: '#0a0',
         warning: '#fa0',
         warningCritical: '#f50',
         divider: '#ddd',
@@ -54,6 +52,12 @@ const mockTheme = {
     },
 };
 
+const multiTextInputMocks = vi.hoisted(() => ({
+    setTextAndSelection: vi.fn(),
+    focus: vi.fn(),
+    blur: vi.fn(),
+}));
+
 vi.mock('react-native', async () => {
     const ReactModule = await import('react');
 
@@ -77,8 +81,8 @@ vi.mock('react-native', async () => {
             dismiss: vi.fn(),
         },
         Platform: {
-            OS: 'ios',
-            select: (value: Record<string, unknown>) => value.ios ?? value.default,
+            OS: 'web',
+            select: (value: Record<string, unknown>) => value.web ?? value.default,
         },
         useWindowDimensions: () => ({
             width: 800,
@@ -147,7 +151,11 @@ vi.mock('./GitStatusBadge', () => ({
 }));
 
 vi.mock('@/sync/storage', () => ({
-    useSetting: (key: string) => key === 'profiles' ? [] : false,
+    useSetting: (key: string) => {
+        if (key === 'profiles') return [];
+        if (key === 'agentInputEnterToSend') return true;
+        return false;
+    },
 }));
 
 vi.mock('@/constants/Typography', () => ({
@@ -227,65 +235,114 @@ vi.mock('happy-wire', () => ({
     FAST_MODE_ICON_COLOR: '#ff0',
 }));
 
-afterEach(() => {
-    vi.resetModules();
-    vi.clearAllMocks();
+vi.mock('./MultiTextInput', async () => {
+    const ReactModule = await import('react');
+
+    const MockMultiTextInput = ReactModule.forwardRef((props: any, ref) => {
+        ReactModule.useImperativeHandle(ref, () => ({
+            setTextAndSelection: (text: string, selection: { start: number; end: number }) => {
+                multiTextInputMocks.setTextAndSelection(text, selection);
+                props.onChangeText?.(text);
+                props.onStateChange?.({ text, selection });
+                props.onSelectionChange?.(selection);
+            },
+            focus: multiTextInputMocks.focus,
+            blur: multiTextInputMocks.blur,
+        }), [props]);
+
+        return ReactModule.createElement('MockMultiTextInput', props);
+    });
+
+    MockMultiTextInput.displayName = 'MockMultiTextInput';
+
+    return {
+        MultiTextInput: MockMultiTextInput,
+        TextInputState: {},
+        MultiTextInputHandle: {},
+    };
 });
 
-describe('AgentInput read-only mode', () => {
-    it('passes editable=false to MultiTextInput when broker attach is read-only', async () => {
-        vi.doMock('./MultiTextInput', async () => {
-            const ReactModule = await import('react');
+afterEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+});
 
-            const MockMultiTextInput = ReactModule.forwardRef((_props: any, _ref) => {
-                return ReactModule.createElement('MockMultiTextInput', _props);
-            });
-            MockMultiTextInput.displayName = 'MockMultiTextInput';
-
-            return {
-                MultiTextInput: MockMultiTextInput,
-                TextInputState: {},
-                MultiTextInputHandle: {},
-            };
-        });
+describe('AgentInput history navigation', () => {
+    it('recalls recently sent input with ArrowUp and ArrowDown', async () => {
+        const onSend = vi.fn();
+        const onChangeText = vi.fn();
 
         const { AgentInput } = await import('./AgentInput');
 
-        let tree!: any;
-        await renderer.act(async () => {
-            tree = renderer.create(
-                <AgentInput
-                    value=""
-                    placeholder="Message"
-                    onChangeText={() => {}}
-                    onSend={() => {}}
-                    autocompletePrefixes={[]}
-                    autocompleteSuggestions={async () => []}
-                    agentType="codex"
-                    isInputDisabled
-                />,
-            );
-        });
-
-        expect(tree.root.findByType('MockMultiTextInput').props.editable).toBe(false);
-    });
-
-    it('passes editable=false to the native text input when MultiTextInput is non-editable', async () => {
-        const { MultiTextInput } = await import('./MultiTextInput');
+        const renderInput = (value: string) => (
+            <AgentInput
+                value={value}
+                placeholder="Message"
+                onChangeText={onChangeText}
+                onSend={onSend}
+                autocompletePrefixes={[]}
+                autocompleteSuggestions={async () => []}
+                agentType="codex"
+            />
+        );
 
         let tree!: any;
         await renderer.act(async () => {
-            tree = renderer.create(
-                <MultiTextInput
-                    value=""
-                    onChangeText={() => {}}
-                    editable={false}
-                />,
-            );
+            tree = renderer.create(renderInput('first question'));
         });
 
-        expect(
-            tree.root.findAll((node: any) => node.props.editable === false).length,
-        ).toBeGreaterThan(0);
+        await renderer.act(async () => {
+            tree.root.findByType('MockMultiTextInput').props.onKeyPress({ key: 'Enter', shiftKey: false });
+        });
+        expect(onSend).toHaveBeenLastCalledWith('first question');
+
+        await renderer.act(async () => {
+            tree.update(renderInput(''));
+        });
+
+        await renderer.act(async () => {
+            tree.update(renderInput('second question'));
+        });
+
+        await renderer.act(async () => {
+            tree.root.findByType('MockMultiTextInput').props.onKeyPress({ key: 'Enter', shiftKey: false });
+        });
+        expect(onSend).toHaveBeenLastCalledWith('second question');
+
+        await renderer.act(async () => {
+            tree.update(renderInput(''));
+        });
+
+        await renderer.act(async () => {
+            tree.root.findByType('MockMultiTextInput').props.onKeyPress({ key: 'ArrowUp', shiftKey: false });
+        });
+        expect(multiTextInputMocks.setTextAndSelection).toHaveBeenLastCalledWith('second question', {
+            start: 'second question'.length,
+            end: 'second question'.length,
+        });
+
+        await renderer.act(async () => {
+            tree.root.findByType('MockMultiTextInput').props.onKeyPress({ key: 'ArrowUp', shiftKey: false });
+        });
+        expect(multiTextInputMocks.setTextAndSelection).toHaveBeenLastCalledWith('first question', {
+            start: 'first question'.length,
+            end: 'first question'.length,
+        });
+
+        await renderer.act(async () => {
+            tree.root.findByType('MockMultiTextInput').props.onKeyPress({ key: 'ArrowDown', shiftKey: false });
+        });
+        expect(multiTextInputMocks.setTextAndSelection).toHaveBeenLastCalledWith('second question', {
+            start: 'second question'.length,
+            end: 'second question'.length,
+        });
+
+        await renderer.act(async () => {
+            tree.root.findByType('MockMultiTextInput').props.onKeyPress({ key: 'ArrowDown', shiftKey: false });
+        });
+        expect(multiTextInputMocks.setTextAndSelection).toHaveBeenLastCalledWith('', {
+            start: 0,
+            end: 0,
+        });
     });
 });

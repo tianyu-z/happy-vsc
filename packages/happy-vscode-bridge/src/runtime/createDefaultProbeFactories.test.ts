@@ -1096,6 +1096,219 @@ describe('createDefaultProbeFactories', () => {
     expect(executeCommand).not.toHaveBeenCalled();
   });
 
+  it('falls back to Claude primaryEditor.open when the captured live channel transport is refused', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'claude-runtime-live-channel-send-refused',
+      claudeLog: `
+2026-03-24 07:07:40.100 [info] Received message from webview: {"type":"launch_claude","channelId":"live-channel-42","cwd":"/home/work","resume":"98774e08-0c03-4d72-89cb-6a29ba6ae93a","model":"opus[1m]","permissionMode":"default","thinkingLevel":"default_on"}
+2026-03-24 07:07:40.907 [info] Received message from webview: {"type":"request","requestId":"9jdfq0fpn4u","request":{"type":"update_session_state","sessionId":"98774e08-0c03-4d72-89cb-6a29ba6ae93a","state":"running","title":"Test setup and configuration"}}
+      `.trim(),
+    });
+    const executeCommand = vi.fn(async () => undefined);
+    const transportMessage = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:38123'), {
+        code: 'ECONNREFUSED',
+      }));
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: executeCommand,
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'claude'
+            ? {
+                allComms: new Set([
+                  {
+                    channels: new Map([
+                      ['live-channel-42', {}],
+                    ]),
+                    transportMessage,
+                  },
+                ]),
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      },
+    });
+
+    const probes = await factories.claude!(
+      makeResolution('claude', ['claude-vscode.primaryEditor.open']),
+    );
+    const [session] = await probes.runtimeProbe!.discoverSessions();
+
+    await expect(
+      probes.runtimeProbe!.sendMessage?.(
+        session.providerSessionRef,
+        'continue from the current context',
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(transportMessage).toHaveBeenCalledTimes(1);
+    expect(executeCommand).toHaveBeenCalledTimes(1);
+    expect(executeCommand).toHaveBeenCalledWith(
+      'claude-vscode.primaryEditor.open',
+      '98774e08-0c03-4d72-89cb-6a29ba6ae93a',
+      'continue from the current context',
+    );
+  });
+
+  it('reroutes Claude sends through the current session panel comm when the logged runtime channel is stale', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'claude-runtime-live-channel-send-reroutes-to-panel-comm',
+      claudeLog: `
+2026-03-24 07:07:40.100 [info] Received message from webview: {"type":"launch_claude","channelId":"live-channel-42","cwd":"/home/work","resume":"98774e08-0c03-4d72-89cb-6a29ba6ae93a","model":"opus[1m]","permissionMode":"default","thinkingLevel":"default_on"}
+2026-03-24 07:07:40.907 [info] Received message from webview: {"type":"request","requestId":"9jdfq0fpn4u","request":{"type":"update_session_state","sessionId":"98774e08-0c03-4d72-89cb-6a29ba6ae93a","state":"running","title":"Test setup and configuration"}}
+      `.trim(),
+    });
+    const executeCommand = vi.fn(async () => undefined);
+    const staleTransportMessage = vi
+      .fn()
+      .mockRejectedValue(
+        Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:38123'), {
+          code: 'ECONNREFUSED',
+        }),
+      );
+    const currentTransportMessage = vi.fn(async () => undefined);
+    const sessionPanel = { viewType: 'claudeVSCodePanel' };
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: executeCommand,
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'claude'
+            ? {
+                allComms: new Set([
+                  {
+                    channels: new Map([
+                      ['live-channel-42', {}],
+                    ]),
+                    transportMessage: staleTransportMessage,
+                  },
+                  {
+                    panelTab: sessionPanel,
+                    channels: new Map([
+                      ['live-channel-84', {}],
+                    ]),
+                    transportMessage: currentTransportMessage,
+                  },
+                ]),
+                sessionPanels: new Map([
+                  ['98774e08-0c03-4d72-89cb-6a29ba6ae93a', sessionPanel],
+                ]),
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      },
+    });
+
+    const probes = await factories.claude!(
+      makeResolution('claude', ['claude-vscode.primaryEditor.open']),
+    );
+    const [session] = await probes.runtimeProbe!.discoverSessions();
+
+    await expect(
+      probes.runtimeProbe!.sendMessage?.(
+        session.providerSessionRef,
+        'continue from the current context',
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(staleTransportMessage).toHaveBeenCalledTimes(1);
+    expect(currentTransportMessage).toHaveBeenCalledTimes(1);
+    expect(currentTransportMessage).toHaveBeenCalledWith(
+      'live-channel-84',
+      {
+        type: 'user',
+        uuid: expect.any(String),
+        session_id: '98774e08-0c03-4d72-89cb-6a29ba6ae93a',
+        parent_tool_use_id: null,
+        message: {
+          role: 'user',
+          content: 'continue from the current context',
+        },
+      },
+      false,
+    );
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('mirrors broker-injected Claude user messages into the active panel UI after transport succeeds', async () => {
+    const fixture = await writeLogFixture({
+      rootName: 'claude-runtime-live-channel-send-mirrors-user-message-into-panel-ui',
+      claudeLog: `
+2026-03-24 07:07:40.100 [info] Received message from webview: {"type":"launch_claude","channelId":"live-channel-42","cwd":"/home/work","resume":"98774e08-0c03-4d72-89cb-6a29ba6ae93a","model":"opus[1m]","permissionMode":"default","thinkingLevel":"default_on"}
+2026-03-24 07:07:40.907 [info] Received message from webview: {"type":"request","requestId":"9jdfq0fpn4u","request":{"type":"update_session_state","sessionId":"98774e08-0c03-4d72-89cb-6a29ba6ae93a","state":"running","title":"Test setup and configuration"}}
+      `.trim(),
+    });
+    const executeCommand = vi.fn(async () => undefined);
+    const transportMessage = vi.fn(async () => undefined);
+    const send = vi.fn();
+    const sessionPanel = { viewType: 'claudeVSCodePanel' };
+    const factories = createDefaultProbeFactories({
+      extensionLogPath: fixture.logPath,
+      workspace: {
+        folderUris: ['file:///workspace'],
+      },
+      commandExecutor: executeCommand,
+      providerCaptures: {
+        getCapturedProvider: (provider) =>
+          provider === 'claude'
+            ? {
+                allComms: new Set([
+                  {
+                    panelTab: sessionPanel,
+                    channels: new Map([
+                      ['live-channel-42', {}],
+                    ]),
+                    transportMessage,
+                    send,
+                  },
+                ]),
+                sessionPanels: new Map([
+                  ['98774e08-0c03-4d72-89cb-6a29ba6ae93a', sessionPanel],
+                ]),
+              }
+            : null,
+        getCaptureDiagnostic: () => null,
+      },
+    });
+
+    const probes = await factories.claude!(
+      makeResolution('claude', ['claude-vscode.primaryEditor.open']),
+    );
+    const [session] = await probes.runtimeProbe!.discoverSessions();
+
+    await probes.runtimeProbe!.sendMessage?.(
+      session.providerSessionRef,
+      'who is kimi?',
+    );
+
+    expect(transportMessage).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith({
+      type: 'io_message',
+      channelId: 'live-channel-42',
+      message: {
+        type: 'user',
+        uuid: expect.any(String),
+        session_id: '98774e08-0c03-4d72-89cb-6a29ba6ae93a',
+        parent_tool_use_id: null,
+        message: {
+          role: 'user',
+          content: 'who is kimi?',
+        },
+      },
+      done: false,
+    });
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
   it('creates a Claude runtime probe that routes prompts into an existing session', async () => {
     const fixture = await writeLogFixture({
       rootName: 'claude-runtime',

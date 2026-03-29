@@ -356,6 +356,8 @@ const getContextWarning = (contextSize: number, maxContextSize: number, alwaysSh
     return null; // No display needed
 };
 
+const MAX_SENT_INPUT_HISTORY = 50;
+
 export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, AgentInputProps>((props, ref) => {
     const styles = stylesheet;
     const { theme } = useUnistyles();
@@ -493,7 +495,12 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         text: props.value,
         selection: { start: 0, end: 0 }
     });
+    const [sentInputHistory, setSentInputHistory] = React.useState<string[]>([]);
     const hasText = inputState.text.trim().length > 0 || props.value.trim().length > 0;
+    const sentInputHistoryRef = React.useRef<string[]>([]);
+    const historyNavigationRef = React.useRef<{ index: number; draft: string } | null>(null);
+    const isApplyingHistoryNavigationRef = React.useRef(false);
+    sentInputHistoryRef.current = sentInputHistory;
 
     // Keep a latest text snapshot to avoid stale parent-state reads during fast click-after-type sends.
     const latestTextRef = React.useRef(props.value);
@@ -517,6 +524,11 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
 
     // Keep the latest text in sync immediately so a fast tap on send doesn't use stale state.
     const handleTextChange = React.useCallback((text: string) => {
+        if (isApplyingHistoryNavigationRef.current) {
+            isApplyingHistoryNavigationRef.current = false;
+        } else {
+            historyNavigationRef.current = null;
+        }
         latestTextRef.current = text;
         props.onChangeText(text);
     }, [props.onChangeText]);
@@ -552,11 +564,93 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
         return latestTextRef.current;
     }, [inputState.text, props.value]);
 
+    const applyHistoryText = React.useCallback((text: string) => {
+        const selection = {
+            start: text.length,
+            end: text.length,
+        };
+        latestTextRef.current = text;
+        setInputState({ text, selection });
+        isApplyingHistoryNavigationRef.current = true;
+
+        if (inputRef.current) {
+            inputRef.current.setTextAndSelection(text, selection);
+            return;
+        }
+
+        props.onChangeText(text);
+    }, [props.onChangeText]);
+
+    const rememberSentInput = React.useCallback((textSnapshot: string) => {
+        if (!textSnapshot.trim()) {
+            return;
+        }
+
+        historyNavigationRef.current = null;
+        setSentInputHistory((previous) => {
+            if (previous[previous.length - 1] === textSnapshot) {
+                return previous;
+            }
+            const next = [...previous, textSnapshot];
+            return next.slice(-MAX_SENT_INPUT_HISTORY);
+        });
+    }, []);
+
+    const sendTextSnapshot = React.useCallback((textSnapshot: string) => {
+        rememberSentInput(textSnapshot);
+        props.onSend(textSnapshot);
+    }, [props.onSend, rememberSentInput]);
+
     // Use the tracked selection from inputState
     const activeWord = useActiveWord(inputState.text, inputState.selection, props.autocompletePrefixes);
     // Using default options: clampSelection=true, autoSelectFirst=true, wrapAround=true
     // To customize: useActiveSuggestions(activeWord, props.autocompleteSuggestions, { clampSelection: false, wrapAround: false })
     const [suggestions, selected, moveUp, moveDown] = useActiveSuggestions(activeWord, props.autocompleteSuggestions, { clampSelection: true, wrapAround: true });
+
+    const handleHistoryNavigation = React.useCallback((direction: 'older' | 'newer'): boolean => {
+        if (Platform.OS !== 'web' || suggestions.length > 0 || isInputDisabled) {
+            return false;
+        }
+
+        const history = sentInputHistoryRef.current;
+        if (history.length === 0) {
+            return false;
+        }
+
+        const activeNavigation = historyNavigationRef.current;
+        if (!activeNavigation) {
+            const isCaretAtStart = inputState.selection.start === 0 && inputState.selection.end === 0;
+            if (direction === 'newer' || !isCaretAtStart || latestTextRef.current.length > 0) {
+                return false;
+            }
+
+            const nextIndex = history.length - 1;
+            historyNavigationRef.current = {
+                index: nextIndex,
+                draft: latestTextRef.current,
+            };
+            applyHistoryText(history[nextIndex]);
+            return true;
+        }
+
+        if (direction === 'older') {
+            const nextIndex = Math.max(0, activeNavigation.index - 1);
+            historyNavigationRef.current = { ...activeNavigation, index: nextIndex };
+            applyHistoryText(history[nextIndex]);
+            return true;
+        }
+
+        if (activeNavigation.index >= history.length - 1) {
+            historyNavigationRef.current = null;
+            applyHistoryText(activeNavigation.draft);
+            return true;
+        }
+
+        const nextIndex = activeNavigation.index + 1;
+        historyNavigationRef.current = { ...activeNavigation, index: nextIndex };
+        applyHistoryText(history[nextIndex]);
+        return true;
+    }, [applyHistoryText, inputState.selection.end, inputState.selection.start, isInputDisabled, suggestions.length]);
 
     // Debug logging
     // React.useEffect(() => {
@@ -680,6 +774,14 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
             }
         }
 
+        if (event.key === 'ArrowUp' && handleHistoryNavigation('older')) {
+            return true;
+        }
+
+        if (event.key === 'ArrowDown' && handleHistoryNavigation('newer')) {
+            return true;
+        }
+
         // Handle Escape for abort when no suggestions are visible
         if (event.key === 'Escape' && props.showAbortButton && props.onAbort && !isAborting) {
             handleAbortPress();
@@ -698,7 +800,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                     isSending: props.isSending,
                     isSendDisabled: isSendButtonDisabled,
                 })) {
-                    props.onSend(textSnapshot);
+                    sendTextSnapshot(textSnapshot);
                     return true; // Key was handled
                 }
                 if (textSnapshot.trim() && isSendButtonDisabled) {
@@ -719,7 +821,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
 
         }
         return false; // Key was not handled
-    }, [suggestions, moveUp, moveDown, selected, handleSuggestionSelect, props.showAbortButton, props.onAbort, isAborting, handleAbortPress, agentInputEnterToSend, resolveSendSnapshot, props.onSend, props.permissionMode, props.onPermissionModeChange, props.isSending, isSendButtonDisabled]);
+    }, [suggestions, moveUp, moveDown, selected, handleSuggestionSelect, handleHistoryNavigation, props.showAbortButton, props.onAbort, isAborting, handleAbortPress, agentInputEnterToSend, resolveSendSnapshot, sendTextSnapshot, props.permissionMode, props.onPermissionModeChange, props.isSending, isSendButtonDisabled]);
 
     const connectionStatusIndicator = props.connectionStatus ? (
         <>
@@ -1670,7 +1772,7 @@ export const AgentInput = React.memo(React.forwardRef<MultiTextInputHandle, Agen
                                             log.log(`[SEND_DEBUG][INPUT] press hasText=${hasText} latestLen=${latestTextRef.current.trim().length} stateLen=${inputState.text.trim().length} propLen=${props.value.trim().length} pickedLen=${textSnapshot.trim().length} mic=${props.onMicPress ? 'yes' : 'no'} disabled=${isSendButtonDisabled ? 'yes' : 'no'}`);
                                             if (textSnapshot.trim()) {
                                                 hapticsLight();
-                                                props.onSend(textSnapshot);
+                                                sendTextSnapshot(textSnapshot);
                                                 return;
                                             }
                                             if (props.onMicPress) {

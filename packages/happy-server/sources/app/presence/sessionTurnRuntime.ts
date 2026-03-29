@@ -1,6 +1,7 @@
 export type SessionTurnState = {
     thinking: boolean;
     awaitingTurnStart: boolean;
+    awaitingTurnStartAt: number | null;
     dispatching: boolean;
     lastHeartbeatAt: number;
 };
@@ -17,16 +18,42 @@ export type SessionTurnState = {
  * Cross-process ordering must be enforced by database-side operations.
  */
 const runtimeBySession = new Map<string, SessionTurnState>();
+const AWAITING_TURN_START_TIMEOUT_MS = 30_000;
+const THINKING_HEARTBEAT_TIMEOUT_MS = 30_000;
 
-function ensureSessionState(sessionId: string): SessionTurnState {
+function pruneExpiredAwaitingTurnStart(state: SessionTurnState, nowMs: number = Date.now()): void {
+    if (!state.awaitingTurnStart || state.awaitingTurnStartAt === null) {
+        return;
+    }
+
+    if (nowMs - state.awaitingTurnStartAt >= AWAITING_TURN_START_TIMEOUT_MS) {
+        state.awaitingTurnStart = false;
+        state.awaitingTurnStartAt = null;
+    }
+}
+
+function pruneExpiredThinking(state: SessionTurnState, nowMs: number = Date.now()): void {
+    if (!state.thinking || state.lastHeartbeatAt <= 0) {
+        return;
+    }
+
+    if (nowMs - state.lastHeartbeatAt >= THINKING_HEARTBEAT_TIMEOUT_MS) {
+        state.thinking = false;
+    }
+}
+
+function ensureSessionState(sessionId: string, nowMs: number = Date.now()): SessionTurnState {
     const existing = runtimeBySession.get(sessionId);
     if (existing) {
+        pruneExpiredAwaitingTurnStart(existing, nowMs);
+        pruneExpiredThinking(existing, nowMs);
         return existing;
     }
 
     const created: SessionTurnState = {
         thinking: false,
         awaitingTurnStart: false,
+        awaitingTurnStartAt: null,
         dispatching: false,
         lastHeartbeatAt: 0,
     };
@@ -34,8 +61,8 @@ function ensureSessionState(sessionId: string): SessionTurnState {
     return created;
 }
 
-export function getSessionTurnState(sessionId: string): SessionTurnState {
-    return { ...ensureSessionState(sessionId) };
+export function getSessionTurnState(sessionId: string, nowMs: number = Date.now()): SessionTurnState {
+    return { ...ensureSessionState(sessionId, nowMs) };
 }
 
 export function isSessionThinking(sessionId: string): boolean {
@@ -70,12 +97,14 @@ export function finishDispatch(sessionId: string): void {
 export function markDispatched(sessionId: string): void {
     const state = ensureSessionState(sessionId);
     state.awaitingTurnStart = true;
+    state.awaitingTurnStartAt = Date.now();
 }
 
 export function markTurnStarted(sessionId: string): void {
     const state = ensureSessionState(sessionId);
     state.thinking = true;
     state.awaitingTurnStart = false;
+    state.awaitingTurnStartAt = null;
     state.dispatching = false;
 }
 
@@ -85,7 +114,7 @@ export function updateThinkingState(sessionId: string, thinking: boolean, timest
     turnEnded: boolean;
     current: SessionTurnState;
 } {
-    const state = ensureSessionState(sessionId);
+    const state = ensureSessionState(sessionId, timestampMs);
     const previousThinking = state.thinking;
 
     if (thinking) {
