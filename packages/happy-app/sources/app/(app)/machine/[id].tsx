@@ -265,6 +265,11 @@ export default function MachineDetailScreen() {
             const result = await machineAttachBrokerSession(machineId, brokerSession.brokerSessionId);
             switch (result.type) {
                 case 'success':
+                    try {
+                        await sync.refreshSessions();
+                    } catch {
+                        // SessionView triggers its own refresh on focus, so do not block navigation here.
+                    }
                     navigateToSession(result.sessionId);
                     break;
                 case 'error':

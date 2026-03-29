@@ -2,6 +2,37 @@ import * as React from 'react';
 import renderer from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const {
+    groupBrokerSessionsByWindowMock,
+    isMachineOnlineMock,
+    machineAttachBrokerSessionMock,
+    machineBashMock,
+    machineListBrokerSessionsMock,
+    machineSpawnNewSessionMock,
+    machineStopDaemonMock,
+    machineUpdateMetadataMock,
+    modalAlertMock,
+    navigateToSessionMock,
+    refreshMachinesMock,
+    refreshSessionsMock,
+} = vi.hoisted(() => ({
+    groupBrokerSessionsByWindowMock: vi.fn((sessions: any[]) => ({
+        mode: 'flat',
+        sessions,
+    })),
+    isMachineOnlineMock: vi.fn(() => false),
+    machineAttachBrokerSessionMock: vi.fn(),
+    machineBashMock: vi.fn(),
+    machineListBrokerSessionsMock: vi.fn(async () => ({ sessions: [] })),
+    machineSpawnNewSessionMock: vi.fn(),
+    machineStopDaemonMock: vi.fn(),
+    machineUpdateMetadataMock: vi.fn(),
+    modalAlertMock: vi.fn(),
+    navigateToSessionMock: vi.fn(),
+    refreshMachinesMock: vi.fn(),
+    refreshSessionsMock: vi.fn(async () => undefined),
+}));
+
 const mockTheme = {
     colors: {
         input: {
@@ -132,17 +163,17 @@ vi.mock('@/sync/storage', () => {
 });
 
 vi.mock('@/sync/ops', () => ({
-    machineAttachBrokerSession: vi.fn(),
-    machineBash: vi.fn(),
-    machineListBrokerSessions: vi.fn(async () => ({ sessions: [] })),
-    machineStopDaemon: vi.fn(),
-    machineUpdateMetadata: vi.fn(),
-    machineSpawnNewSession: vi.fn(),
+    machineAttachBrokerSession: machineAttachBrokerSessionMock,
+    machineBash: machineBashMock,
+    machineListBrokerSessions: machineListBrokerSessionsMock,
+    machineStopDaemon: machineStopDaemonMock,
+    machineUpdateMetadata: machineUpdateMetadataMock,
+    machineSpawnNewSession: machineSpawnNewSessionMock,
 }));
 
 vi.mock('@/modal', () => ({
     Modal: {
-        alert: vi.fn(),
+        alert: modalAlertMock,
         prompt: vi.fn(),
         confirm: vi.fn(),
     },
@@ -168,10 +199,7 @@ vi.mock('@/utils/brokerSessionUtils', () => ({
 }));
 
 vi.mock('@/utils/brokerWindowGroups', () => ({
-    groupBrokerSessionsByWindow: () => ({
-        mode: 'grouped',
-        groups: [],
-    }),
+    groupBrokerSessionsByWindow: groupBrokerSessionsByWindowMock,
 }));
 
 vi.mock('@/utils/sessionUtils', () => ({
@@ -181,13 +209,14 @@ vi.mock('@/utils/sessionUtils', () => ({
 }));
 
 vi.mock('@/utils/machineUtils', () => ({
-    isMachineOnline: () => false,
+    isMachineOnline: isMachineOnlineMock,
 }));
 
 vi.mock('@/sync/sync', () => ({
     sync: {
         getCredentials: () => null,
-        refreshMachines: vi.fn(),
+        refreshMachines: refreshMachinesMock,
+        refreshSessions: refreshSessionsMock,
     },
 }));
 
@@ -196,7 +225,7 @@ vi.mock('@/text', () => ({
 }));
 
 vi.mock('@/hooks/useNavigateToSession', () => ({
-    useNavigateToSession: () => vi.fn(),
+    useNavigateToSession: () => navigateToSessionMock,
 }));
 
 vi.mock('@/utils/pathUtils', () => ({
@@ -255,7 +284,59 @@ afterEach(() => {
     machineState = undefined;
     vi.clearAllMocks();
     vi.resetModules();
+    groupBrokerSessionsByWindowMock.mockImplementation((sessions: any[]) => ({
+        mode: 'flat',
+        sessions,
+    }));
+    isMachineOnlineMock.mockReturnValue(false);
+    machineListBrokerSessionsMock.mockResolvedValue({ sessions: [] });
+    refreshSessionsMock.mockResolvedValue(undefined);
 });
+
+function createOnlineMachine() {
+    return {
+        id: 'machine-1',
+        metadata: {
+            host: 'DESKTOP-0C3Q24O',
+            homeDir: '/home/work',
+        },
+        metadataVersion: 1,
+    };
+}
+
+function createAttachableBrokerSession() {
+    return {
+        brokerSessionId: 'broker-session-1',
+        provider: 'claude',
+        title: 'Claude live session',
+        attachability: 'attachable',
+        capabilities: ['sendUserMessage'],
+        degradedFlags: [],
+        desiredMode: 'runtime_preferred',
+        effectiveMode: 'runtime',
+        modeReason: 'runtime_ready',
+        compatibility: 'supported',
+        providerExtension: {
+            id: 'anthropic.claude-code',
+            version: '1.0.0',
+        },
+        probeHealth: {
+            runtime: 'ready',
+            storage: 'ready',
+        },
+    };
+}
+
+async function renderMachineDetailScreen() {
+    const { default: MachineDetailScreen } = await import('../../app/(app)/machine/[id]');
+    let tree!: ReturnType<typeof renderer.create>;
+    await renderer.act(async () => {
+        tree = renderer.create(<MachineDetailScreen />);
+        await Promise.resolve();
+        await Promise.resolve();
+    });
+    return tree;
+}
 
 describe('MachineDetailScreen', () => {
     it('does not change hook order when the machine loads after the first render', async () => {
@@ -281,5 +362,49 @@ describe('MachineDetailScreen', () => {
         })).resolves.toBeUndefined();
 
         errorSpy.mockRestore();
+    });
+
+    it('refreshes sessions before navigating after a successful broker attach', async () => {
+        machineState = createOnlineMachine();
+        isMachineOnlineMock.mockReturnValue(true);
+        machineListBrokerSessionsMock.mockResolvedValue({
+            sessions: [createAttachableBrokerSession()],
+        });
+        machineAttachBrokerSessionMock.mockResolvedValue({
+            type: 'success',
+            sessionId: 'session-broker-1',
+        });
+
+        const tree = await renderMachineDetailScreen();
+        const attachRow = tree.root.findByProps({ title: 'Claude live session' });
+
+        await renderer.act(async () => {
+            await attachRow.props.onPress();
+        });
+
+        expect(refreshSessionsMock).toHaveBeenCalledTimes(1);
+        expect(navigateToSessionMock).toHaveBeenCalledWith('session-broker-1');
+    });
+
+    it('keeps the user on the machine page when broker attach fails', async () => {
+        machineState = createOnlineMachine();
+        isMachineOnlineMock.mockReturnValue(true);
+        machineListBrokerSessionsMock.mockResolvedValue({
+            sessions: [createAttachableBrokerSession()],
+        });
+        machineAttachBrokerSessionMock.mockResolvedValue({
+            type: 'error',
+            errorMessage: 'Bridge unreachable',
+        });
+
+        const tree = await renderMachineDetailScreen();
+        const attachRow = tree.root.findByProps({ title: 'Claude live session' });
+
+        await renderer.act(async () => {
+            await attachRow.props.onPress();
+        });
+
+        expect(navigateToSessionMock).not.toHaveBeenCalled();
+        expect(modalAlertMock).toHaveBeenCalledWith('common.error', 'Bridge unreachable');
     });
 });
