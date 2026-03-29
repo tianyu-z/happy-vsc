@@ -23,7 +23,7 @@ const {
     isMachineOnlineMock: vi.fn(() => false),
     machineAttachBrokerSessionMock: vi.fn(),
     machineBashMock: vi.fn(),
-    machineListBrokerSessionsMock: vi.fn(async () => ({ sessions: [] })),
+    machineListBrokerSessionsMock: vi.fn(async (): Promise<{ sessions: any[] }> => ({ sessions: [] })),
     machineSpawnNewSessionMock: vi.fn(),
     machineStopDaemonMock: vi.fn(),
     machineUpdateMetadataMock: vi.fn(),
