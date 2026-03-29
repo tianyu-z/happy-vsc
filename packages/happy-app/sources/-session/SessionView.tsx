@@ -34,6 +34,7 @@ import {
     getBrokerSessionStripSummary,
     isBrokerSessionReadOnly,
 } from '@/utils/brokerSessionUtils';
+import { shouldShowBrokerHydrationPlaceholder } from '@/utils/brokerSessionHydration';
 import { BrokerStripMode, createBrokerStripStateController } from '@/utils/brokerStripState';
 import { navigateBackFromSession } from '@/utils/sessionNavigation';
 import { formatPathRelativeToHome, generateCopyTitle, getSessionAvatarId, getSessionName, useSessionStatus, copySessionMetadata } from '@/utils/sessionUtils';
@@ -549,6 +550,16 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             ...(sessionStatus.state === 'permission_required' && { action: 'openPermission' as const }),
         };
     }, [silentRefreshPhase, isRefreshingStatus, sessionStatus, theme.colors.status.connecting, theme.colors.status.error, handleRetryStatusRefresh]);
+    const showBrokerHydrationPlaceholder = React.useMemo(
+        () => shouldShowBrokerHydrationPlaceholder({
+            sessionSource: session.metadata?.sessionSource,
+            createdAt: session.createdAt,
+            isLoaded,
+            messageCount: messages.length,
+            silentRefreshPhase,
+        }),
+        [session.createdAt, session.metadata?.sessionSource, isLoaded, messages.length, silentRefreshPhase],
+    );
 
     // Ref for the input component (used for web auto-focus)
     const inputRef = React.useRef<MultiTextInputHandle>(null);
@@ -910,7 +921,17 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
     );
     const placeholder = messages.length === 0 ? (
         <>
-            {isLoaded ? (
+            {showBrokerHydrationPlaceholder ? (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32 }}>
+                    <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+                    <Text style={{ color: theme.colors.text, marginTop: 12, fontSize: 18, fontWeight: '600' }}>
+                        {t('sessionInfo.brokerHydratingTitle')}
+                    </Text>
+                    <Text style={{ color: theme.colors.textSecondary, marginTop: 8, textAlign: 'center' }}>
+                        {t('sessionInfo.brokerHydratingDescription')}
+                    </Text>
+                </View>
+            ) : isLoaded ? (
                 <EmptyMessages session={session} />
             ) : (
                 <ActivityIndicator size="small" color={theme.colors.textSecondary} />

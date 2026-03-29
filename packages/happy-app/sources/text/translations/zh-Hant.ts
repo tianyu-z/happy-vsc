@@ -830,6 +830,8 @@ export const zhHant: TranslationStructure = {
         brokerAttached: 'Broker attached',
         brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
         brokerLimitedCapabilities: 'Limited broker capabilities',
+        brokerHydratingTitle: '正在連接即時會話...',
+        brokerHydratingDescription: '正在同步 VS Code 對話上下文，稍後顯示聊天記錄。',
         brokerRuntimeAttached: '已連接執行階段',
         brokerRuntimeDegraded: '執行階段能力已降級',
         brokerStorageFallback: '已回退到儲存',

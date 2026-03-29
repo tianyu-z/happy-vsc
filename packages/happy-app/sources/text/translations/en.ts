@@ -845,6 +845,8 @@ export const en: TranslationStructure = {
         brokerAttached: 'Broker attached',
         brokerAttachedMessage: 'This session is attached to a live VS Code conversation.',
         brokerLimitedCapabilities: 'Limited broker capabilities',
+        brokerHydratingTitle: 'Connecting to live session...',
+        brokerHydratingDescription: 'Syncing the VS Code conversation context before showing the chat history.',
         brokerRuntimeAttached: 'Runtime attached',
         brokerRuntimeDegraded: 'Runtime degraded',
         brokerStorageFallback: 'Storage fallback',

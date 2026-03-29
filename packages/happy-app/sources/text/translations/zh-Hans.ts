@@ -830,6 +830,8 @@ export const zhHans: TranslationStructure = {
         brokerAttached: '已通过 Broker 附着',
         brokerAttachedMessage: '此会话已附着到 VS Code 中的实时对话。',
         brokerLimitedCapabilities: 'Broker 能力受限',
+        brokerHydratingTitle: '正在连接实时会话...',
+        brokerHydratingDescription: '正在同步 VS Code 会话上下文，稍后显示聊天记录。',
         brokerRuntimeAttached: '已连接运行时',
         brokerRuntimeDegraded: '运行时能力已降级',
         brokerStorageFallback: '已回退到存储',
