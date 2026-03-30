@@ -37,6 +37,7 @@ describe('bridge extension entrypoint', () => {
     expect(pkg.publisher).toBe('happy');
     expect(typeof pkg.main).toBe('string');
     expect(pkg.main).toContain('dist/');
+    expect(pkg.extensionKind).toEqual(['workspace']);
     expect(pkg.activationEvents).toContain('*');
     expect(
       pkg.contributes?.commands?.some(

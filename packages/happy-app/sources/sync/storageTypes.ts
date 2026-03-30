@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+    brokerInventorySummarySchema,
+    brokerRuntimeKindSchema,
+} from 'happy-wire';
 
 //
 // Agent states
@@ -40,13 +44,21 @@ export const MetadataSchema = z.object({
     claudeSessionId: z.string().optional(), // Claude Code session ID
     codexSessionId: z.string().optional(), // Codex CLI conversation ID
     sessionSource: z.string().optional(),
+    transportKind: z.string().optional(),
     brokerSessionId: z.string().optional(),
+    brokerMachineId: z.string().optional(),
+    brokerInstanceId: z.string().optional(),
+    canonicalBrokerSessionKey: z.string().optional(),
     brokerCapabilities: z.array(z.string()).optional(),
     brokerDegradedFlags: z.array(z.string()).optional(),
     brokerDesiredMode: z.enum(['runtime_preferred', 'storage_preferred']).optional(),
     brokerEffectiveMode: z.enum(['runtime', 'storage']).optional(),
     brokerModeReason: z.string().optional(),
     brokerCompatibility: z.enum(['supported', 'unknown', 'incompatible']).optional(),
+    runtimeKind: brokerRuntimeKindSchema.optional(),
+    runtimeLabel: z.string().optional(),
+    windowLabel: z.string().optional(),
+    preferredHostIp: z.string().optional(),
     brokerProviderExtension: z.object({
         id: z.string(),
         version: z.string(),
@@ -217,6 +229,20 @@ export const MachineMetadataSchema = z.object({
 
 export type MachineMetadata = z.infer<typeof MachineMetadataSchema>;
 
+export const DaemonStateSchema = z.object({
+    status: z.string().optional(),
+    pid: z.number().optional(),
+    httpPort: z.number().optional(),
+    startTime: z.number().optional(),
+    startedAt: z.number().optional(),
+    startedWithCliVersion: z.string().optional(),
+    shutdownRequestedAt: z.number().optional(),
+    shutdownSource: z.string().optional(),
+    brokerInventory: brokerInventorySummarySchema.optional(),
+}).passthrough();
+
+export type DaemonState = z.infer<typeof DaemonStateSchema>;
+
 export interface Machine {
     id: string;
     seq: number;
@@ -226,7 +252,7 @@ export interface Machine {
     activeAt: number;  // Changed from lastActiveAt to activeAt for consistency
     metadata: MachineMetadata | null;
     metadataVersion: number;
-    daemonState: any | null;  // Dynamic daemon state (runtime info)
+    daemonState: DaemonState | null;  // Dynamic daemon state (runtime info)
     daemonStateVersion: number;
 }
 

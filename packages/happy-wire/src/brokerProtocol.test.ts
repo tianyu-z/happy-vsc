@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  brokerInstanceManifestSchema,
+  brokerInventorySummarySchema,
   brokerDiscoveredSessionSchema,
   brokerSnapshotSchema,
   brokerEventSchema,
@@ -33,6 +35,87 @@ describe('broker protocol', () => {
     expect(session.effectiveMode).toBe('runtime');
     expect(session.compatibility).toBe('supported');
     expect(session.probeHealth.runtime).toBe('ready');
+  });
+
+  it('parses a bridge instance manifest for a workspace-host broker', () => {
+    const manifest = brokerInstanceManifestSchema.parse({
+      installationId: 'install-1',
+      instanceId: 'instance-1',
+      logicalWindowKey: 'window-1',
+      editorSessionId: 'editor-1',
+      machineId: 'machine-1',
+      windowLabel: 'api',
+      workspaceFolders: ['/workspace/api'],
+      runtimeKind: 'ssh',
+      runtimeLabel: 'ssh:gpu-1',
+      bridgeHostIps: ['10.0.0.2'],
+      preferredHostIp: '10.0.0.2',
+      runtimeIp: '10.0.0.2',
+      providerKinds: ['claude', 'codex'],
+      brokerEndpoint: 'ws://127.0.0.1:7777',
+      brokerAuthToken: 'broker-token',
+      pid: 1234,
+      startedAt: 1,
+      lastHeartbeatAt: 2,
+      ttlMs: 10_000,
+    });
+
+    expect(manifest.runtimeKind).toBe('ssh');
+    expect(manifest.providerKinds).toEqual(['claude', 'codex']);
+    expect(manifest.brokerEndpoint).toBe('ws://127.0.0.1:7777');
+  });
+
+  it('parses a broker inventory summary with canonical session keys', () => {
+    const summary = brokerInventorySummarySchema.parse({
+      updatedAt: 123,
+      instances: [
+        {
+          installationId: 'install-1',
+          instanceId: 'instance-1',
+          logicalWindowKey: 'window-1',
+          editorSessionId: 'editor-1',
+          machineId: 'machine-1',
+          windowLabel: 'api',
+          workspaceFolders: ['/workspace/api'],
+          runtimeKind: 'ssh',
+          runtimeLabel: 'ssh:gpu-1',
+          bridgeHostIps: ['10.0.0.2'],
+          preferredHostIp: '10.0.0.2',
+          runtimeIp: '10.0.0.2',
+          providerKinds: ['codex'],
+          startedAt: 100,
+          lastSeenAt: 123,
+          ttlMs: 10_000,
+          status: 'online',
+        },
+      ],
+      sessions: [
+        {
+          canonicalSessionKey: 'machine-1:instance-1:sess-1',
+          instanceId: 'instance-1',
+          brokerSessionId: 'sess-1',
+          providerSessionKey: 'provider-key-1',
+          provider: 'codex',
+          title: 'Fix API',
+          attachability: 'attachable',
+          capabilities: ['sendUserMessage'],
+          degradedFlags: [],
+          desiredMode: 'runtime_preferred',
+          effectiveMode: 'runtime',
+          modeReason: 'runtime_ready',
+          compatibility: 'supported',
+          providerExtension: { id: 'openai.chatgpt', version: '1.0.0' },
+          probeHealth: { runtime: 'ready', storage: 'ready' },
+          lastActiveAt: 120,
+          messagePreview: 'Need to fix the API',
+        },
+      ],
+    });
+
+    expect(summary.instances[0]?.status).toBe('online');
+    expect(summary.sessions[0]?.canonicalSessionKey).toBe(
+      'machine-1:instance-1:sess-1',
+    );
   });
 
   it('parses a snapshot (with runtime metadata)', () => {

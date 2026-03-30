@@ -4,6 +4,7 @@ import {
   ApiUpdateMachineStateSchema as WireApiUpdateMachineStateSchema,
   ApiUpdateNewMessageSchema as WireApiUpdateNewMessageSchema,
   ApiUpdateSessionStateSchema as WireApiUpdateSessionStateSchema,
+  brokerInventorySummarySchema,
   SessionMessageContentSchema as WireSessionMessageContentSchema,
   SessionMessageSchema as WireSessionMessageSchema,
   UpdateSchema as WireUpdateSchema,
@@ -205,6 +206,7 @@ export const DaemonStateSchema = z.object({
   httpPort: z.number().optional(),
   startedAt: z.number().optional(),
   shutdownRequestedAt: z.number().optional(),
+  brokerInventory: brokerInventorySummarySchema.optional(),
   shutdownSource:
     z.union([
       z.enum(['mobile-app', 'cli', 'os-signal', 'unknown']),
@@ -373,7 +375,11 @@ export type Metadata = {
   archiveReason?: string,
   flavor?: string,
   sessionSource?: 'direct' | 'broker_attached' | string,
+  transportKind?: 'vscode-broker' | string,
   brokerSessionId?: string,
+  brokerMachineId?: string,
+  brokerInstanceId?: string,
+  canonicalBrokerSessionKey?: string,
   brokerCapabilities?: string[],
   brokerDegradedFlags?: string[],
   brokerDesiredMode?: BrokerDesiredMode,
@@ -382,6 +388,10 @@ export type Metadata = {
   brokerCompatibility?: BrokerCompatibility,
   brokerProviderExtension?: BrokerProviderExtension,
   brokerProbeHealth?: BrokerProbeHealth,
+  runtimeKind?: string,
+  runtimeLabel?: string,
+  windowLabel?: string,
+  preferredHostIp?: string,
   // Worktree metadata
   isWorktree?: boolean,
   worktreeBasePath?: string,

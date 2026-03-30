@@ -1,59 +1,55 @@
-import { z } from 'zod';
+import {
+    brokerAttachabilitySchema,
+    brokerCompatibilitySchema,
+    brokerDesiredModeSchema,
+    brokerEffectiveModeSchema,
+    brokerInventoryInstanceSchema,
+    brokerInventorySessionSchema,
+    brokerInventorySummarySchema,
+    brokerProbeHealthSchema,
+    brokerProviderExtensionSchema,
+    brokerProviderSchema,
+    brokerRuntimeKindSchema,
+    type BrokerAttachability,
+    type BrokerCompatibility,
+    type BrokerDesiredMode,
+    type BrokerEffectiveMode,
+    type BrokerInventoryInstance,
+    type BrokerInventorySession,
+    type BrokerInventorySummary,
+    type BrokerProbeHealth,
+    type BrokerProvider,
+    type BrokerProviderExtension,
+    type BrokerRuntimeKind,
+} from 'happy-wire';
 
-export const brokerProviderSchema = z.enum(['claude', 'codex']);
-export type BrokerProvider = z.infer<typeof brokerProviderSchema>;
+export {
+    brokerAttachabilitySchema,
+    brokerCompatibilitySchema,
+    brokerDesiredModeSchema,
+    brokerEffectiveModeSchema,
+    brokerInventoryInstanceSchema,
+    brokerInventorySessionSchema,
+    brokerInventorySummarySchema,
+    brokerProbeHealthSchema,
+    brokerProviderExtensionSchema,
+    brokerProviderSchema,
+    brokerRuntimeKindSchema,
+};
 
-export const brokerDesiredModeSchema = z.enum([
-    'runtime_preferred',
-    'storage_preferred',
-]);
-export type BrokerDesiredMode = z.infer<typeof brokerDesiredModeSchema>;
+export type {
+    BrokerAttachability,
+    BrokerCompatibility,
+    BrokerDesiredMode,
+    BrokerEffectiveMode,
+    BrokerInventoryInstance,
+    BrokerInventorySummary,
+    BrokerProbeHealth,
+    BrokerProvider,
+    BrokerProviderExtension,
+    BrokerRuntimeKind,
+};
 
-export const brokerEffectiveModeSchema = z.enum(['runtime', 'storage']);
-export type BrokerEffectiveMode = z.infer<typeof brokerEffectiveModeSchema>;
-
-export const brokerCompatibilitySchema = z.enum([
-    'supported',
-    'unknown',
-    'incompatible',
-]);
-export type BrokerCompatibility = z.infer<typeof brokerCompatibilitySchema>;
-
-export const brokerProviderExtensionSchema = z.object({
-    id: z.string().min(1),
-    version: z.string().min(1),
-}).strict();
-export type BrokerProviderExtension = z.infer<typeof brokerProviderExtensionSchema>;
-
-export const brokerProbeHealthSchema = z.object({
-    runtime: z.enum(['ready', 'degraded', 'unavailable']),
-    storage: z.enum(['ready', 'stale', 'unavailable']),
-}).strict();
-export type BrokerProbeHealth = z.infer<typeof brokerProbeHealthSchema>;
-
-export const brokerAttachabilitySchema = z.enum([
-    'attachable',
-    'attachable_with_degraded_capabilities',
-    'not_attachable',
-]);
-export type BrokerAttachability = z.infer<typeof brokerAttachabilitySchema>;
-
-const brokerRuntimeMetadataShape = {
-    desiredMode: brokerDesiredModeSchema,
-    effectiveMode: brokerEffectiveModeSchema,
-    modeReason: z.string().min(1),
-    compatibility: brokerCompatibilitySchema,
-    providerExtension: brokerProviderExtensionSchema,
-    probeHealth: brokerProbeHealthSchema,
-} as const;
-
-export const brokerDiscoveredSessionSchema = z.object({
-    brokerSessionId: z.string().min(1),
-    provider: brokerProviderSchema,
-    title: z.string(),
-    attachability: brokerAttachabilitySchema,
-    capabilities: z.array(z.string()),
-    degradedFlags: z.array(z.string()),
-    ...brokerRuntimeMetadataShape,
-}).strict();
-export type BrokerDiscoveredSession = z.infer<typeof brokerDiscoveredSessionSchema>;
+// Keep the historical app name to minimize churn in existing UI code.
+export const brokerDiscoveredSessionSchema = brokerInventorySessionSchema;
+export type BrokerDiscoveredSession = BrokerInventorySession;

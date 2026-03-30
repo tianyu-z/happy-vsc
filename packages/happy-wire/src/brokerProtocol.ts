@@ -18,6 +18,17 @@ export type BrokerModeReason = z.infer<typeof brokerModeReasonSchema>;
 export const brokerCompatibilitySchema = z.enum(['supported', 'unknown', 'incompatible']);
 export type BrokerCompatibility = z.infer<typeof brokerCompatibilitySchema>;
 
+export const brokerRuntimeKindSchema = z.enum([
+  'local',
+  'wsl',
+  'ssh',
+  'dev-container',
+  'codespace',
+  'tunnel',
+  'unknown',
+]);
+export type BrokerRuntimeKind = z.infer<typeof brokerRuntimeKindSchema>;
+
 export const brokerProviderExtensionSchema = z.object({
   id: z.string().min(1),
   version: z.string().min(1),
@@ -81,6 +92,90 @@ export const brokerDiscoveredSessionSchema = z
   })
   .strict();
 export type BrokerDiscoveredSession = z.infer<typeof brokerDiscoveredSessionSchema>;
+
+export const brokerInstanceManifestSchema = z
+  .object({
+    installationId: z.string().min(1),
+    instanceId: z.string().min(1),
+    logicalWindowKey: z.string().min(1),
+    editorSessionId: z.string().min(1).optional(),
+    machineId: z.string().min(1).optional(),
+    windowLabel: z.string().min(1),
+    workspaceFolders: z.array(z.string()),
+    runtimeKind: brokerRuntimeKindSchema,
+    runtimeLabel: z.string().min(1),
+    bridgeHostIps: z.array(z.string()),
+    preferredHostIp: z.string().min(1).optional(),
+    runtimeIp: z.string().min(1).optional(),
+    providerKinds: z.array(brokerProviderSchema),
+    brokerEndpoint: z.string().min(1),
+    brokerAuthToken: z.string().min(1),
+    pid: z.number().int().nonnegative(),
+    startedAt: z.number().int().nonnegative(),
+    lastHeartbeatAt: z.number().int().nonnegative(),
+    ttlMs: z.number().int().positive(),
+  })
+  .strict();
+export type BrokerInstanceManifest = z.infer<typeof brokerInstanceManifestSchema>;
+
+export const brokerInventoryInstanceStatusSchema = z.enum([
+  'online',
+  'stale',
+  'shadowed',
+]);
+export type BrokerInventoryInstanceStatus = z.infer<
+  typeof brokerInventoryInstanceStatusSchema
+>;
+
+export const brokerInventoryInstanceSchema = z
+  .object({
+    installationId: z.string().min(1),
+    instanceId: z.string().min(1),
+    logicalWindowKey: z.string().min(1),
+    editorSessionId: z.string().min(1).optional(),
+    machineId: z.string().min(1).optional(),
+    windowLabel: z.string().min(1),
+    workspaceFolders: z.array(z.string()),
+    runtimeKind: brokerRuntimeKindSchema,
+    runtimeLabel: z.string().min(1),
+    bridgeHostIps: z.array(z.string()),
+    preferredHostIp: z.string().min(1).optional(),
+    runtimeIp: z.string().min(1).optional(),
+    providerKinds: z.array(brokerProviderSchema),
+    startedAt: z.number().int().nonnegative(),
+    lastSeenAt: z.number().int().nonnegative(),
+    ttlMs: z.number().int().positive(),
+    status: brokerInventoryInstanceStatusSchema,
+  })
+  .strict();
+export type BrokerInventoryInstance = z.infer<typeof brokerInventoryInstanceSchema>;
+
+export const brokerInventorySessionSchema = z
+  .object({
+    canonicalSessionKey: z.string().min(1),
+    instanceId: z.string().min(1),
+    brokerSessionId: brokerIdSchema,
+    providerSessionKey: z.string().min(1),
+    provider: brokerProviderSchema,
+    title: z.string(),
+    attachability: brokerAttachabilitySchema,
+    capabilities: z.array(z.string()),
+    degradedFlags: z.array(z.string()),
+    ...brokerRuntimeMetadataShape,
+    lastActiveAt: z.number().int().nonnegative(),
+    messagePreview: z.string().optional(),
+  })
+  .strict();
+export type BrokerInventorySession = z.infer<typeof brokerInventorySessionSchema>;
+
+export const brokerInventorySummarySchema = z
+  .object({
+    updatedAt: z.number().int().nonnegative(),
+    instances: z.array(brokerInventoryInstanceSchema),
+    sessions: z.array(brokerInventorySessionSchema),
+  })
+  .strict();
+export type BrokerInventorySummary = z.infer<typeof brokerInventorySummarySchema>;
 
 export const brokerAttachmentKindSchema = z.enum([
   'image',

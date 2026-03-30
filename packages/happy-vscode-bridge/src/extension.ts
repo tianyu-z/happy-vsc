@@ -1,3 +1,16 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { networkInterfaces as defaultNetworkInterfaces } from 'node:os';
+
+import type { BrokerProvider } from 'happy-wire';
+
+import {
+  FileBridgeInstallationIdStore,
+  buildBridgeInstanceIdentity,
+  getBridgeInstallationIdPath,
+  resolveBridgeHappyHomeDir,
+} from './broker/BridgeInstanceIdentity';
+import { HeartbeatService } from './broker/HeartbeatService';
 import { BrokerManifestStore } from './broker/BrokerManifestStore';
 import { BrokerServer, type BrokerAdapterHost } from './broker/BrokerServer';
 import { SharedSessionStore } from './broker/SharedSessionStore';
@@ -19,6 +32,8 @@ import {
   createDefaultProbeFactories,
   resolveExthostLogDir,
 } from './runtime/createDefaultProbeFactories';
+import { detectHostIpInfo } from './runtime/ipAddress';
+import { deriveRuntimeInfo } from './runtime/runtimeLabel';
 import type { WorkspaceLocator } from './runtime/types';
 import {
   bridgeCommandIds,
@@ -76,6 +91,9 @@ type ActivateOptions = {
   ) => Promise<void>;
   sharedCaptureCandidates?: unknown[];
   token?: string;
+  happyHomeDir?: string;
+  now?: () => number;
+  networkInterfaces?: typeof defaultNetworkInterfaces;
   vscode?: {
     commands?: {
       getCommands?(filterInternal?: boolean): Promise<string[]>;
@@ -122,9 +140,17 @@ type ActivateOptions = {
         content: string;
         language?: string;
       }): Promise<unknown>;
-      workspaceFile?: { toString(): string } | null;
+      workspaceFile?:
+        | {
+            toString(): string;
+            fsPath?: string;
+          }
+        | null;
       workspaceFolders?: Array<{
-        uri: { toString(): string };
+        uri: {
+          toString(): string;
+          fsPath?: string;
+        };
       }> | null;
     };
     Uri?: {
@@ -135,6 +161,11 @@ type ActivateOptions = {
         chatSessionType: string,
         provider: unknown,
       ): { dispose(): unknown };
+    };
+    env?: {
+      sessionId?: string;
+      remoteName?: string;
+      remoteAuthority?: string;
     };
     extensions?:
       | unknown[]
@@ -159,6 +190,7 @@ const emptyAdapterHost: BrokerAdapterHost = {
 let activeServer: BrokerServer | null = null;
 let activeRuntime: CompanionRuntimeLike | null = null;
 let activeFacade: AdapterFacade | null = null;
+let activeHeartbeat: HeartbeatService | null = null;
 
 async function loadVscodeHost() {
   const loader = new Function('return import("vscode")') as () => Promise<{
@@ -204,6 +236,21 @@ async function loadVscodeHost() {
         content: string;
         language?: string;
       }): Promise<unknown>;
+      workspaceFile?: {
+        toString(): string;
+        fsPath?: string;
+      } | null;
+      workspaceFolders?: Array<{
+        uri: {
+          toString(): string;
+          fsPath?: string;
+        };
+      }> | null;
+    };
+    env: {
+      sessionId?: string;
+      remoteName?: string;
+      remoteAuthority?: string;
     };
     Uri: {
       parse(value: string): unknown;
@@ -233,6 +280,69 @@ function toWorkspaceLocator(vscode: ActivateOptions['vscode']): WorkspaceLocator
     workspaceFileUri,
     ...(folderUris?.length ? { folderUris } : {}),
   };
+}
+
+function toManifestWorkspaceFolders(vscode: ActivateOptions['vscode']): string[] {
+  return (
+    vscode?.workspace?.workspaceFolders
+      ?.map((folder) => folder.uri.fsPath ?? folder.uri.toString())
+      .filter((value): value is string => value.length > 0) ?? []
+  );
+}
+
+function toLabelSegment(value: string): string {
+  const normalized = value.replace(/[\\/]+$/, '');
+  const parts = normalized.split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) ?? value;
+}
+
+function buildWindowLabel(vscode: ActivateOptions['vscode']): string {
+  const workspaceFolders = toManifestWorkspaceFolders(vscode);
+  if (workspaceFolders.length > 0) {
+    return workspaceFolders.map((value) => toLabelSegment(value)).join(', ');
+  }
+
+  const workspaceFile =
+    vscode?.workspace?.workspaceFile?.fsPath ??
+    vscode?.workspace?.workspaceFile?.toString();
+  if (workspaceFile) {
+    return toLabelSegment(workspaceFile);
+  }
+
+  return 'VS Code';
+}
+
+function extractProviderKinds(runtime: CompanionRuntimeLike): BrokerProvider[] {
+  return Array.from(
+    new Set(
+      runtime
+        .listProviderDiagnostics()
+        .map((diagnostic) => diagnostic.provider)
+        .filter(
+          (provider): provider is BrokerProvider =>
+            provider === 'claude' || provider === 'codex',
+        ),
+    ),
+  ).sort();
+}
+
+function toBrokerEndpoint(url: string): string {
+  const parsed = new URL(url);
+  return `${parsed.protocol}//${parsed.host}${parsed.pathname === '/' ? '' : parsed.pathname}`;
+}
+
+async function readMachineIdFromSettings(
+  happyHomeDir: string,
+): Promise<string | undefined> {
+  try {
+    const raw = await readFile(join(happyHomeDir, 'settings.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { machineId?: unknown };
+    return typeof parsed.machineId === 'string' && parsed.machineId.length > 0
+      ? parsed.machineId
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function buildDiagnosticsReport(params: {
@@ -406,8 +516,33 @@ export async function activate(
     runtime,
     store,
   });
-  const manifestStore = new BrokerManifestStore(context.globalStorageUri.fsPath);
+  const happyHomeDir = resolveBridgeHappyHomeDir(options.happyHomeDir);
+  const installationIdStore = new FileBridgeInstallationIdStore(
+    getBridgeInstallationIdPath(happyHomeDir),
+  );
+  const initialProviderKinds = extractProviderKinds(runtime);
+  const identity = await buildBridgeInstanceIdentity({
+    remoteName: vscode.env?.remoteName,
+    workspaceFolders: toManifestWorkspaceFolders(vscode),
+    extensionKind: 'workspace',
+    editorSessionId: vscode.env?.sessionId,
+    providerHostFingerprint: initialProviderKinds.join(','),
+    installationIdStore,
+  });
+  const manifestStore = BrokerManifestStore.forInstance(identity.instanceId, {
+    happyHomeDir,
+  });
+  const machineId = await readMachineIdFromSettings(happyHomeDir);
+  const runtimeInfo = deriveRuntimeInfo({
+    remoteName: vscode.env?.remoteName,
+    remoteAuthority: vscode.env?.remoteAuthority,
+  });
+  const hostIpInfo = detectHostIpInfo(
+    options.networkInterfaces ?? defaultNetworkInterfaces,
+  );
+  const brokerStartedAt = (options.now ?? Date.now)();
   let server: BrokerServer | null = null;
+  let heartbeat: HeartbeatService | null = null;
 
   const startBroker = async () => {
     if (server) {
@@ -416,14 +551,56 @@ export async function activate(
 
     server = await BrokerServer.start({
       adapterHost,
-      manifestStore,
       store,
       token: options.token,
     });
-    activeServer = server;
+    const startedServer = server;
+    activeServer = startedServer;
+
+    heartbeat = new HeartbeatService({
+      intervalMs: 2_000,
+      now: options.now,
+      manifestStore,
+      buildManifest: (lastHeartbeatAt) => ({
+        installationId: identity.installationId,
+        instanceId: identity.instanceId,
+        logicalWindowKey: identity.logicalWindowKey,
+        ...(identity.editorSessionId
+          ? { editorSessionId: identity.editorSessionId }
+          : {}),
+        ...(machineId ? { machineId } : {}),
+        windowLabel: buildWindowLabel(vscode),
+        workspaceFolders: toManifestWorkspaceFolders(vscode),
+        runtimeKind: runtimeInfo.runtimeKind,
+        runtimeLabel: runtimeInfo.runtimeLabel,
+        bridgeHostIps: hostIpInfo.bridgeHostIps,
+        ...(hostIpInfo.preferredHostIp
+          ? { preferredHostIp: hostIpInfo.preferredHostIp }
+          : {}),
+        ...(hostIpInfo.runtimeIp ? { runtimeIp: hostIpInfo.runtimeIp } : {}),
+        providerKinds: extractProviderKinds(runtime),
+        brokerEndpoint: toBrokerEndpoint(startedServer.url),
+        brokerAuthToken: startedServer.token,
+        pid: process.pid,
+        startedAt: brokerStartedAt,
+        lastHeartbeatAt,
+        ttlMs: 10_000,
+      }),
+    });
+    activeHeartbeat = heartbeat;
+    await heartbeat.start();
   };
 
   const stopBroker = async () => {
+    if (heartbeat) {
+      const active = heartbeat;
+      heartbeat = null;
+      if (activeHeartbeat === active) {
+        activeHeartbeat = null;
+      }
+      await active.stop();
+    }
+
     if (!server) {
       return;
     }
@@ -506,12 +683,18 @@ export async function activate(
 }
 
 export async function deactivate() {
+  const heartbeat = activeHeartbeat;
+  activeHeartbeat = null;
   const server = activeServer;
   activeServer = null;
   const runtime = activeRuntime;
   activeRuntime = null;
   const facade = activeFacade;
   activeFacade = null;
+
+  if (heartbeat) {
+    await heartbeat.stop();
+  }
 
   if (facade) {
     await facade.dispose();

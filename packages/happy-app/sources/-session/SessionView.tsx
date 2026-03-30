@@ -18,7 +18,7 @@ import { Modal } from '@/modal';
 import { voiceHooks } from '@/realtime/hooks/voiceHooks';
 import { startRealtimeSession, stopRealtimeSession } from '@/realtime/RealtimeSession';
 import { sessionAbort, machineGetClaudeSessionUserMessages, machineDuplicateClaudeSession, machineSpawnNewSession, machineGetGeminiSessionUserMessages, machineDuplicateGeminiSession, machineGetCodexSessionUserMessages, machineDuplicateCodexSession, type UserMessageWithUuid } from '@/sync/ops';
-import { storage, useIsDataReady, useLocalSetting, useOrchestratorRunningTaskCount, useRealtimeStatus, useSessionMessages, useSessionPendingMessages, useSessionUsage, useSetting } from '@/sync/storage';
+import { storage, useIsDataReady, useLocalSetting, useMachine, useOrchestratorRunningTaskCount, useRealtimeStatus, useSessionMessages, useSessionPendingMessages, useSessionUsage, useSetting } from '@/sync/storage';
 import { useSession } from '@/sync/storage';
 import { Session } from '@/sync/storageTypes';
 import { sync } from '@/sync/sync';
@@ -27,7 +27,7 @@ import { tracking, trackMessageSent } from '@/track';
 import { handleImagePasteEvent } from '@/utils/imagePaste';
 import { isRunningOnMac } from '@/utils/platform';
 import { useDeviceType, useHeaderHeight, useIsLandscape, useIsTablet } from '@/utils/responsive';
-import { getBrokerSessionMetadataSummary } from '@/utils/brokerSessionUtils';
+import { formatBrokerRowSubtitle, getBrokerSessionMetadataSummary } from '@/utils/brokerSessionUtils';
 import { formatPathRelativeToHome, generateCopyTitle, getSessionAvatarId, getSessionName, useSessionStatus, copySessionMetadata } from '@/utils/sessionUtils';
 import { isVersionSupported, useLatestCliVersion } from '@/utils/versionUtils';
 import { log } from '@/log';
@@ -292,6 +292,11 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
     const { messages, isLoaded, fetchVersion } = useSessionMessages(sessionId);
     const pendingMessages = useSessionPendingMessages(sessionId);
     const acknowledgedCliVersions = useLocalSetting('acknowledgedCliVersions');
+    const transportMachineId = session.metadata?.brokerMachineId || session.metadata?.machineId;
+    const transportMachine = useMachine(transportMachineId ?? '');
+    const transportMachineLabel = transportMachine?.metadata?.displayName
+        || transportMachine?.metadata?.host
+        || transportMachineId;
 
     // Check if CLI version is outdated and not already acknowledged
     const cliVersion = session.metadata?.version;
@@ -804,6 +809,24 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
         () => getBrokerSessionMetadataSummary(session.metadata, t),
         [session.metadata],
     );
+    const brokerTransportSummary = React.useMemo(() => {
+        if (session.metadata?.transportKind !== 'vscode-broker') {
+            return null;
+        }
+
+        return formatBrokerRowSubtitle({
+            runtimeLabel: session.metadata.runtimeLabel,
+            machineLabel: transportMachineLabel,
+            windowLabel: session.metadata.windowLabel,
+            preferredHostIp: session.metadata.preferredHostIp,
+        });
+    }, [
+        session.metadata?.preferredHostIp,
+        session.metadata?.runtimeLabel,
+        session.metadata?.transportKind,
+        session.metadata?.windowLabel,
+        transportMachineLabel,
+    ]);
     const brokerMetadataNotice = brokerMetadataSummary ? (
         <View style={{
             paddingHorizontal: 16,
@@ -815,6 +838,15 @@ function SessionViewLoaded({ sessionId, session }: { sessionId: string, session:
             }}>
                 {brokerMetadataSummary}
             </Text>
+            {brokerTransportSummary ? (
+                <Text style={{
+                    marginTop: 2,
+                    fontSize: 11,
+                    color: theme.colors.textSecondary,
+                }}>
+                    {brokerTransportSummary}
+                </Text>
+            ) : null}
         </View>
     ) : null;
     const betweenContentAndInput = (

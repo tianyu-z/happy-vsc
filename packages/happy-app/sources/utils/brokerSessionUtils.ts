@@ -4,11 +4,12 @@ import type {
     BrokerDesiredMode,
     BrokerDiscoveredSession,
     BrokerEffectiveMode,
+    BrokerInventoryInstance,
     BrokerProvider,
     BrokerProviderExtension,
 } from '@/sync/brokerTypes';
 
-import type { Metadata } from '@/sync/storageTypes';
+import type { Machine, Metadata } from '@/sync/storageTypes';
 
 type BrokerSessionTranslationKey =
     | 'sessionInfo.brokerAttached'
@@ -35,6 +36,22 @@ type BrokerRuntimeMetadataLike = {
     providerExtension?: BrokerProviderExtension;
 };
 
+export type FlattenedBrokerSession = BrokerDiscoveredSession & {
+    machineId: string;
+    machineLabel: string;
+    machineHost?: string;
+    installationId: string;
+    logicalWindowKey: string;
+    windowLabel: string;
+    runtimeKind: BrokerInventoryInstance['runtimeKind'];
+    runtimeLabel: string;
+    bridgeHostIps: string[];
+    preferredHostIp?: string;
+    runtimeIp?: string;
+    lastSeenAt: number;
+    instanceStatus: BrokerInventoryInstance['status'];
+};
+
 const ATTACHABILITY_LABEL_KEYS: Record<BrokerAttachability, BrokerSessionTranslationKey> = {
     attachable: 'machine.brokerAttachability.attachable',
     attachable_with_degraded_capabilities: 'machine.brokerAttachability.attachable_with_degraded_capabilities',
@@ -53,6 +70,67 @@ const DEGRADED_FLAG_LABEL_KEYS: Record<string, BrokerSessionTranslationKey> = {
     attachment_bridge_unavailable: 'machine.brokerDegradedFlags.attachment_bridge_unavailable',
     selection_context_stale: 'machine.brokerDegradedFlags.selection_context_stale',
 };
+
+export function flattenBrokerSessions(
+    machines: Array<Pick<Machine, 'id' | 'metadata' | 'daemonState'>>,
+): FlattenedBrokerSession[] {
+    return machines
+        .flatMap((machine) => {
+            const inventory = machine.daemonState?.brokerInventory;
+            if (!inventory) {
+                return [];
+            }
+
+            const instancesById = new Map(
+                inventory.instances.map((instance) => [instance.instanceId, instance] as const),
+            );
+            const machineHost = machine.metadata?.host;
+            const machineLabel = machine.metadata?.displayName?.trim() || machineHost || machine.id;
+
+            return inventory.sessions.flatMap((session) => {
+                const instance = instancesById.get(session.instanceId);
+                if (!instance || instance.status !== 'online') {
+                    return [];
+                }
+
+                return [{
+                    ...session,
+                    machineId: machine.id,
+                    machineLabel,
+                    ...(machineHost ? { machineHost } : {}),
+                    installationId: instance.installationId,
+                    logicalWindowKey: instance.logicalWindowKey,
+                    windowLabel: instance.windowLabel,
+                    runtimeKind: instance.runtimeKind,
+                    runtimeLabel: instance.runtimeLabel,
+                    bridgeHostIps: [...instance.bridgeHostIps],
+                    ...(instance.preferredHostIp
+                        ? { preferredHostIp: instance.preferredHostIp }
+                        : {}),
+                    ...(instance.runtimeIp ? { runtimeIp: instance.runtimeIp } : {}),
+                    lastSeenAt: instance.lastSeenAt,
+                    instanceStatus: instance.status,
+                }];
+            });
+        })
+        .sort((left, right) => right.lastActiveAt - left.lastActiveAt);
+}
+
+export function formatBrokerRowSubtitle(input: {
+    runtimeLabel?: string;
+    machineLabel?: string;
+    windowLabel?: string;
+    preferredHostIp?: string;
+}): string {
+    const topLine = input.runtimeLabel?.trim() ?? '';
+    const bottomLine = [
+        input.machineLabel?.trim(),
+        input.windowLabel?.trim(),
+        input.preferredHostIp?.trim(),
+    ].filter((value): value is string => Boolean(value)).join(' • ');
+
+    return [topLine, bottomLine].filter(Boolean).join('\n');
+}
 
 export function getBrokerSessionBadge(
     metadata: Pick<Metadata, 'sessionSource'> | null | undefined,

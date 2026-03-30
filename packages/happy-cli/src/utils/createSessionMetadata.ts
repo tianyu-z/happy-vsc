@@ -44,6 +44,17 @@ export interface CreateSessionMetadataOptions {
     brokerCompatibility?: Metadata['brokerCompatibility'];
     brokerProviderExtension?: Metadata['brokerProviderExtension'];
     brokerProbeHealth?: Metadata['brokerProbeHealth'];
+    transport?: {
+        kind: 'vscode-broker';
+        brokerMachineId?: string;
+        brokerInstanceId: string;
+        brokerSessionId: string;
+        canonicalBrokerSessionKey: string;
+        runtimeKind?: string;
+        runtimeLabel?: string;
+        windowLabel?: string;
+        preferredHostIp?: string;
+    };
 }
 
 /**
@@ -181,6 +192,17 @@ export function createSessionMetadata(opts: CreateSessionMetadataOptions): Sessi
             brokerCompatibility: opts.brokerCompatibility,
             brokerProviderExtension: opts.brokerProviderExtension,
             brokerProbeHealth: opts.brokerProbeHealth,
+        } : {}),
+        ...(opts.transport ? {
+            transportKind: opts.transport.kind,
+            brokerMachineId: opts.transport.brokerMachineId,
+            brokerInstanceId: opts.transport.brokerInstanceId,
+            brokerSessionId: opts.transport.brokerSessionId,
+            canonicalBrokerSessionKey: opts.transport.canonicalBrokerSessionKey,
+            runtimeKind: opts.transport.runtimeKind,
+            runtimeLabel: opts.transport.runtimeLabel,
+            windowLabel: opts.transport.windowLabel,
+            preferredHostIp: opts.transport.preferredHostIp,
         } : {}),
         // Worktree metadata: env vars from daemon take priority, otherwise detect via git
         ...detectWorktreeMetadata(),

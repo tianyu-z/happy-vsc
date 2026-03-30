@@ -70,6 +70,14 @@ export default function RootLayout() {
                 }}
             />
             <Stack.Screen
+                name="session/live"
+                options={{
+                    headerShown: true,
+                    headerTitle: 'Live Sessions',
+                    headerBackTitle: t('common.back'),
+                }}
+            />
+            <Stack.Screen
                 name="session/[id]"
                 options={{
                     headerShown: false

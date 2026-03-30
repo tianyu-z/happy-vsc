@@ -10,6 +10,9 @@
   "engines": {
     "vscode": "^1.100.0"
   },
+  "extensionKind": [
+    "workspace"
+  ],
   "activationEvents": [
     "*",
     "onCommand:happyVscodeBridge.refreshSessions"

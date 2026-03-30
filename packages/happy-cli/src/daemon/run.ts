@@ -650,7 +650,7 @@ export async function startDaemon(): Promise<void> {
         }
         const reusableSession = findReusableBrokerSession(
           pidToTrackedSession,
-          options.brokerSessionId,
+          options.canonicalBrokerSessionKey ?? options.brokerSessionId,
         );
         if (reusableSession?.happySessionId) {
           return {
@@ -670,6 +670,30 @@ export async function startDaemon(): Promise<void> {
         }
         if (options.brokerUrl) {
           brokerAttachArgs.push('--broker-url', options.brokerUrl);
+        }
+        if (options.brokerMachineId) {
+          brokerAttachArgs.push('--broker-machine-id', options.brokerMachineId);
+        }
+        if (options.instanceId) {
+          brokerAttachArgs.push('--broker-instance-id', options.instanceId);
+        }
+        if (options.canonicalBrokerSessionKey) {
+          brokerAttachArgs.push(
+            '--canonical-broker-session-key',
+            options.canonicalBrokerSessionKey,
+          );
+        }
+        if (options.runtimeKind) {
+          brokerAttachArgs.push('--runtime-kind', options.runtimeKind);
+        }
+        if (options.runtimeLabel) {
+          brokerAttachArgs.push('--runtime-label', options.runtimeLabel);
+        }
+        if (options.windowLabel) {
+          brokerAttachArgs.push('--window-label', options.windowLabel);
+        }
+        if (options.preferredHostIp) {
+          brokerAttachArgs.push('--preferred-host-ip', options.preferredHostIp);
         }
 
         const brokerExtraEnv = await resolveBrokerAttachEnv();
@@ -692,6 +716,7 @@ export async function startDaemon(): Promise<void> {
           startedBy: 'daemon',
           source: 'broker_attached',
           brokerSessionId: options.brokerSessionId,
+          canonicalBrokerSessionKey: options.canonicalBrokerSessionKey,
           pid: brokerAttachProcess.pid,
           childProcess: brokerAttachProcess,
         };

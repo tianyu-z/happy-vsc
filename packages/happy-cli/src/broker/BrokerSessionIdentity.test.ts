@@ -6,7 +6,7 @@ it('builds a stable broker-backed Happy session tag', () => {
   expect(
     buildBrokerSessionTag({
       machineId: 'machine-1',
-      brokerSessionId: 'broker-sess-1',
+      canonicalSessionKey: 'machine-1:instance-1:broker-sess-1',
     }),
-  ).toBe('broker:machine-1:broker-sess-1');
+  ).toBe('vscode-broker:machine-1:machine-1:instance-1:broker-sess-1');
 });

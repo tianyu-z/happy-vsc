@@ -27,6 +27,13 @@ export type RunBrokerAttachedSessionOptions = {
   brokerSessionId: string;
   startedBy?: 'daemon' | 'terminal';
   machineId?: string;
+  brokerMachineId?: string;
+  brokerInstanceId?: string;
+  canonicalBrokerSessionKey?: string;
+  runtimeKind?: string;
+  runtimeLabel?: string;
+  windowLabel?: string;
+  preferredHostIp?: string;
   notifyDaemonSessionStarted?: (sessionId: string, metadata: Metadata) => Promise<unknown>;
   sessionTag?: string;
 };
@@ -49,6 +56,13 @@ export async function runBrokerAttachedSession(options: RunBrokerAttachedSession
     brokerUrl,
     machineMetadata: initialMachineMetadata,
     machineId,
+    brokerMachineId: options.brokerMachineId,
+    brokerInstanceId: options.brokerInstanceId,
+    canonicalBrokerSessionKey: options.canonicalBrokerSessionKey,
+    runtimeKind: options.runtimeKind,
+    runtimeLabel: options.runtimeLabel,
+    windowLabel: options.windowLabel,
+    preferredHostIp: options.preferredHostIp,
     notifyDaemonSessionStarted:
       options.notifyDaemonSessionStarted ?? notifyDaemonSessionStarted,
     sessionTag: options.sessionTag,

@@ -52,6 +52,13 @@ export type BrokerRelayRunnerOptions = {
   brokerUrl?: string;
   machineMetadata: MachineMetadata;
   machineId: string;
+  brokerMachineId?: string;
+  brokerInstanceId?: string;
+  canonicalBrokerSessionKey?: string;
+  runtimeKind?: string;
+  runtimeLabel?: string;
+  windowLabel?: string;
+  preferredHostIp?: string;
   notifyDaemonSessionStarted?: (sessionId: string, metadata: Metadata) => Promise<unknown>;
   sessionTag?: string;
   setupOfflineReconnection: SetupOfflineReconnectionFn;
@@ -117,6 +124,9 @@ export class BrokerRelayRunner {
       }
 
       this.attachedBrokerSessionId = snapshot.brokerSessionId;
+      const canonicalBrokerSessionKey =
+        this.options.canonicalBrokerSessionKey
+        ?? `${this.options.brokerMachineId ?? this.options.machineId}:${this.options.brokerInstanceId ?? 'legacy'}:${snapshot.brokerSessionId}`;
       const { metadata, state } = createSessionMetadata({
         flavor: snapshot.provider,
         machineId: this.options.machineId,
@@ -131,12 +141,23 @@ export class BrokerRelayRunner {
         brokerCompatibility: snapshot.compatibility,
         brokerProviderExtension: snapshot.providerExtension,
         brokerProbeHealth: snapshot.probeHealth,
+        transport: {
+          kind: 'vscode-broker',
+          brokerMachineId: this.options.brokerMachineId ?? this.options.machineId,
+          brokerInstanceId: this.options.brokerInstanceId ?? 'legacy',
+          brokerSessionId: snapshot.brokerSessionId,
+          canonicalBrokerSessionKey,
+          runtimeKind: this.options.runtimeKind,
+          runtimeLabel: this.options.runtimeLabel,
+          windowLabel: this.options.windowLabel,
+          preferredHostIp: this.options.preferredHostIp,
+        },
       });
       const sessionTag =
         this.options.sessionTag ??
         buildBrokerSessionTag({
           machineId: this.options.machineId,
-          brokerSessionId: snapshot.brokerSessionId,
+          canonicalSessionKey: canonicalBrokerSessionKey,
         });
       const response = await this.options.api.getOrCreateSession({
         tag: sessionTag,

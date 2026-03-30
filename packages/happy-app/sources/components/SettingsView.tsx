@@ -248,6 +248,12 @@ export const SettingsView = React.memo(function SettingsView() {
             {/* Machines (sorted: online first, then last seen desc) */}
             {allMachines.length > 0 && (
                 <ItemGroup title={t('settings.machines')}>
+                    <Item
+                        title="Live Sessions"
+                        subtitle="Active Claude and Codex live sessions from VS Code across all machines"
+                        icon={<Ionicons name="sparkles-outline" size={29} color="#007AFF" />}
+                        onPress={() => router.push('/session/live')}
+                    />
                     {[...allMachines].map((machine) => {
                         const isOnline = isMachineOnline(machine);
                         const host = machine.metadata?.host || 'Unknown';

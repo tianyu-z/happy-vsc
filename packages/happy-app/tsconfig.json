@@ -7,7 +7,13 @@
       "@/*": [
         "./sources/*"
       ],
-      "hello-world": [ "../../hello-world" ]
+      "hello-world": [ "../../hello-world" ],
+      "happy-wire": [
+        "../happy-wire/src/index.ts"
+      ],
+      "happy-wire/*": [
+        "../happy-wire/src/*"
+      ]
     },
     "jsx": "react-jsx",
     "esModuleInterop": true,
@@ -32,6 +38,7 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    "../happy-wire/src/**/*.ts",
     ".expo/types/**/*.ts",
     "expo-env.d.ts",
     "nativewind-env.d.ts"

@@ -5,7 +5,6 @@
 
 import { io, Socket } from 'socket.io-client';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { logger } from '@/ui/logger';
 import { configuration } from '@/configuration';
 import { MachineMetadata, DaemonState, Machine, Update, UpdateMachineBody } from './types';
@@ -23,8 +22,9 @@ import { backoff } from '@/utils/time';
 import { RpcHandlerManager } from './rpc/RpcHandlerManager';
 import { execSync, execFileSync } from 'node:child_process';
 import { readdirSync, rmdirSync } from 'node:fs';
-import { BrokerClient } from '@/broker/BrokerClient';
-import { loadBrokerManifest } from '@/broker/brokerManifest';
+import { BrokerInventoryManager } from '@/broker/BrokerInventoryManager';
+
+const BROKER_INVENTORY_REFRESH_MS = 3_000;
 
 function createSessionCacheStatsReporter(
     saveStats: (stats: SessionCacheRuntimeStats) => Promise<void>,
@@ -158,15 +158,12 @@ type MachineRpcHandlers = {
     }>;
 }
 
-type BrokerTransport = {
-    brokerRootDir: string;
-    brokerUrl: string;
-};
-
 export class ApiMachineClient {
     private socket!: Socket<ServerToDaemonEvents, DaemonToServerEvents>;
     private keepAliveInterval: NodeJS.Timeout | null = null;
+    private brokerInventoryInterval: NodeJS.Timeout | null = null;
     private rpcHandlerManager: RpcHandlerManager;
+    private readonly brokerInventoryManager: BrokerInventoryManager;
 
     private claudeCache = new SessionCache({
         loader: listClaudeSessionsFromIndex,
@@ -205,21 +202,15 @@ export class ApiMachineClient {
         registerOpenClawHandlers(this.rpcHandlerManager, {
             key: this.machine.encryptionKey
         });
+        this.brokerInventoryManager = new BrokerInventoryManager({
+            machineId: this.machine.id,
+            happyHomeDir: this.machine.metadata?.happyHomeDir || configuration.happyHomeDir,
+        });
 
         // Set up OpenClaw event forwarding
         openClawTunnelManager.setEventCallback((tunnelId, event, payload) => {
             this.broadcastOpenClawEvent(tunnelId, event, payload);
         });
-    }
-
-    private async resolveBrokerTransport(): Promise<BrokerTransport> {
-        const brokerRootDir = join(homedir(), '.happy-vsc');
-        const manifest = await loadBrokerManifest(brokerRootDir);
-
-        return {
-            brokerRootDir,
-            brokerUrl: manifest.url,
-        };
     }
 
     /**
@@ -285,26 +276,42 @@ export class ApiMachineClient {
         });
 
         this.rpcHandlerManager.registerHandler('broker-list-sessions', async () => {
-            const transport = await this.resolveBrokerTransport();
-            const brokerClient = new BrokerClient(transport.brokerUrl);
-            const sessions = await brokerClient.discoverSessions();
-            return { sessions };
+            const summary = await this.brokerInventoryManager.buildSummary();
+            return { sessions: summary.sessions };
         });
 
         this.rpcHandlerManager.registerHandler('broker-attach-session', async (params: any) => {
-            const { brokerSessionId } = params || {};
+            const {
+                canonicalSessionKey,
+                instanceId,
+                brokerSessionId,
+            } = params || {};
 
             if (!brokerSessionId || typeof brokerSessionId !== 'string') {
                 throw new Error('brokerSessionId is required');
             }
-
-            const transport = await this.resolveBrokerTransport();
-            const result = await spawnSession({
-                directory: transport.brokerRootDir,
-                source: 'broker_attached',
+            const attachTarget = await this.brokerInventoryManager.resolveAttachTarget({
+                canonicalSessionKey:
+                    typeof canonicalSessionKey === 'string' ? canonicalSessionKey : undefined,
+                instanceId: typeof instanceId === 'string' ? instanceId : undefined,
                 brokerSessionId,
-                brokerUrl: transport.brokerUrl,
-                brokerRootDir: transport.brokerRootDir,
+            });
+            const directory =
+                attachTarget.manifest.workspaceFolders[0]
+                || this.machine.metadata?.homeDir
+                || configuration.happyHomeDir;
+            const result = await spawnSession({
+                directory,
+                source: 'broker_attached',
+                brokerSessionId: attachTarget.brokerSessionId,
+                brokerUrl: attachTarget.brokerUrl,
+                instanceId: attachTarget.instanceId,
+                canonicalBrokerSessionKey: attachTarget.canonicalSessionKey,
+                brokerMachineId: this.machine.id,
+                runtimeKind: attachTarget.manifest.runtimeKind,
+                runtimeLabel: attachTarget.manifest.runtimeLabel,
+                windowLabel: attachTarget.manifest.windowLabel,
+                preferredHostIp: attachTarget.manifest.preferredHostIp,
             });
 
             switch (result.type) {
@@ -794,12 +801,15 @@ export class ApiMachineClient {
 
             // Start keep-alive
             this.startKeepAlive();
+            this.startBrokerInventorySync();
+            void this.syncBrokerInventoryState();
         });
 
         this.socket.on('disconnect', () => {
             logger.debug('[API MACHINE] Disconnected from server');
             this.rpcHandlerManager.onSocketDisconnect();
             this.stopKeepAlive();
+            this.stopBrokerInventorySync();
         });
 
         // Single consolidated RPC handler
@@ -838,6 +848,37 @@ export class ApiMachineClient {
         this.socket.io.on('error', (error: any) => {
             logger.debug('[API MACHINE] Socket error:', error);
         });
+    }
+
+    private startBrokerInventorySync(): void {
+        if (this.brokerInventoryInterval) {
+            return;
+        }
+
+        this.brokerInventoryInterval = setInterval(() => {
+            void this.syncBrokerInventoryState();
+        }, BROKER_INVENTORY_REFRESH_MS);
+    }
+
+    private stopBrokerInventorySync(): void {
+        if (!this.brokerInventoryInterval) {
+            return;
+        }
+
+        clearInterval(this.brokerInventoryInterval);
+        this.brokerInventoryInterval = null;
+    }
+
+    private async syncBrokerInventoryState(): Promise<void> {
+        try {
+            const summary = await this.brokerInventoryManager.buildSummary();
+            await this.updateDaemonState((state) => ({
+                ...(state ?? { status: 'running' }),
+                brokerInventory: summary,
+            } as DaemonState));
+        } catch (error) {
+            logger.debug('[API MACHINE] Failed to refresh broker inventory', error);
+        }
     }
 
     private startKeepAlive() {

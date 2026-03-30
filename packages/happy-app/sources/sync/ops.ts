@@ -283,13 +283,24 @@ export async function machineListBrokerSessions(
 
 export async function machineAttachBrokerSession(
     machineId: string,
-    brokerSessionId: string,
+    target: {
+        brokerSessionId: string;
+        instanceId?: string;
+        canonicalSessionKey?: string;
+    },
 ): Promise<SpawnSessionResult> {
     try {
-        return await apiSocket.machineRPC<SpawnSessionResult, { brokerSessionId: string }>(
+        return await apiSocket.machineRPC<
+            SpawnSessionResult,
+            {
+                brokerSessionId: string;
+                instanceId?: string;
+                canonicalSessionKey?: string;
+            }
+        >(
             machineId,
             'broker-attach-session',
-            { brokerSessionId },
+            target,
         );
     } catch (error) {
         return {

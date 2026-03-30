@@ -8,7 +8,7 @@
       "es2022"
     ],
     "jsx": "react",
-    "rootDir": "src",
+    "rootDir": "..",
     "declaration": true,
     "strict": true,
     "noImplicitAny": true,
@@ -30,6 +30,12 @@
       "./node_modules/@types"
     ],
     "paths": {
+      "happy-wire": [
+        "../happy-wire/src/index.ts"
+      ],
+      "happy-wire/*": [
+        "../happy-wire/src/*"
+      ],
       "@/*": [
         "./src/*"
       ]
@@ -41,6 +47,7 @@
   ],
   "include": [
     "src/**/*.ts",
-    "src/**/*.tsx"
+    "src/**/*.tsx",
+    "../happy-wire/src/**/*.ts"
   ]
 }

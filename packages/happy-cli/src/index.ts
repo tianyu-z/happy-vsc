@@ -119,6 +119,13 @@ async function spawnAndWaitForDaemon(): Promise<boolean> {
       let brokerRootDir: string | undefined = undefined;
       let brokerUrl: string | undefined = undefined;
       let brokerSessionId: string | undefined = undefined;
+      let brokerMachineId: string | undefined = undefined;
+      let brokerInstanceId: string | undefined = undefined;
+      let canonicalBrokerSessionKey: string | undefined = undefined;
+      let runtimeKind: string | undefined = undefined;
+      let runtimeLabel: string | undefined = undefined;
+      let windowLabel: string | undefined = undefined;
+      let preferredHostIp: string | undefined = undefined;
 
       for (let i = 1; i < args.length; i++) {
         if (args[i] === '--started-by') {
@@ -135,6 +142,34 @@ async function spawnAndWaitForDaemon(): Promise<boolean> {
         }
         if (args[i] === '--broker-session-id') {
           brokerSessionId = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-machine-id') {
+          brokerMachineId = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-instance-id') {
+          brokerInstanceId = args[++i];
+          continue;
+        }
+        if (args[i] === '--canonical-broker-session-key') {
+          canonicalBrokerSessionKey = args[++i];
+          continue;
+        }
+        if (args[i] === '--runtime-kind') {
+          runtimeKind = args[++i];
+          continue;
+        }
+        if (args[i] === '--runtime-label') {
+          runtimeLabel = args[++i];
+          continue;
+        }
+        if (args[i] === '--window-label') {
+          windowLabel = args[++i];
+          continue;
+        }
+        if (args[i] === '--preferred-host-ip') {
+          preferredHostIp = args[++i];
           continue;
         }
       }
@@ -165,6 +200,13 @@ async function spawnAndWaitForDaemon(): Promise<boolean> {
         brokerRootDir,
         brokerUrl,
         brokerSessionId,
+        brokerMachineId,
+        brokerInstanceId,
+        canonicalBrokerSessionKey,
+        runtimeKind,
+        runtimeLabel,
+        windowLabel,
+        preferredHostIp,
       });
     } catch (error) {
       console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error');

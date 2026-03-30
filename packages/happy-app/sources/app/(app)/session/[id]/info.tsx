@@ -108,6 +108,11 @@ function SessionInfoContent({ session }: { session: Session }) {
     // Check if machine daemon has a newer CLI version than this session
     const machineId = session.metadata?.machineId;
     const machine = useMachine(machineId ?? '');
+    const brokerMachineId = session.metadata?.brokerMachineId || machineId;
+    const brokerMachine = useMachine(brokerMachineId ?? '');
+    const brokerMachineLabel = brokerMachine?.metadata?.displayName
+        || brokerMachine?.metadata?.host
+        || brokerMachineId;
     const machineDaemonVersion = machine?.metadata?.happyCliVersion;
     const sessionVersion = session.metadata?.version;
     const isUpgradeAvailable = sessionVersion && machineDaemonVersion
@@ -937,6 +942,74 @@ function SessionInfoContent({ session }: { session: Session }) {
                             icon={<Image source={require('@/assets/images/icon-dootask-outline.png')} style={{ width: 29, height: 29 }} contentFit="contain" />}
                             onPress={() => router.navigate(`/dootask/${session.metadata!.externalContext!.resourceId}`)}
                         />
+                    </ItemGroup>
+                )}
+
+                {session.metadata?.transportKind === 'vscode-broker' && (
+                    <ItemGroup title="VS Code Broker">
+                        <Item
+                            title="Transport"
+                            subtitle={session.metadata.transportKind}
+                            icon={<Ionicons name="git-network-outline" size={29} color="#007AFF" />}
+                            showChevron={false}
+                            copy
+                        />
+                        {brokerMachineLabel && (
+                            <Item
+                                title="Machine"
+                                subtitle={brokerMachineLabel}
+                                icon={<Ionicons name="desktop-outline" size={29} color="#34C759" />}
+                                showChevron={false}
+                            />
+                        )}
+                        {session.metadata?.brokerInstanceId && (
+                            <Item
+                                title="Broker Instance"
+                                subtitle={session.metadata.brokerInstanceId}
+                                icon={<Ionicons name="layers-outline" size={29} color="#5856D6" />}
+                                subtitleStyle={{ fontFamily: 'Menlo', fontSize: 12 }}
+                                showChevron={false}
+                                copy
+                            />
+                        )}
+                        {session.metadata?.canonicalBrokerSessionKey && (
+                            <Item
+                                title="Canonical Session"
+                                subtitle={session.metadata.canonicalBrokerSessionKey}
+                                icon={<Ionicons name="link-outline" size={29} color="#AF52DE" />}
+                                subtitleStyle={{ fontFamily: 'Menlo', fontSize: 12 }}
+                                showChevron={false}
+                                copy
+                            />
+                        )}
+                        {session.metadata?.runtimeLabel && (
+                            <Item
+                                title="Runtime"
+                                subtitle={session.metadata.runtimeKind
+                                    ? `${session.metadata.runtimeKind} • ${session.metadata.runtimeLabel}`
+                                    : session.metadata.runtimeLabel}
+                                icon={<Ionicons name="server-outline" size={29} color="#007AFF" />}
+                                showChevron={false}
+                            />
+                        )}
+                        {session.metadata?.windowLabel && (
+                            <Item
+                                title="Window"
+                                subtitle={session.metadata.windowLabel}
+                                icon={<Ionicons name="browsers-outline" size={29} color="#FF9500" />}
+                                showChevron={false}
+                            />
+                        )}
+                        {session.metadata?.preferredHostIp && (
+                            <Item
+                                title="Preferred IP"
+                                subtitle={session.metadata.preferredHostIp}
+                                icon={<Ionicons name="locate-outline" size={29} color="#FF9500" />}
+                                subtitleStyle={{ fontFamily: 'Menlo', fontSize: 12 }}
+                                showChevron={false}
+                                copy
+                            />
+                        )}
                     </ItemGroup>
                 )}
 

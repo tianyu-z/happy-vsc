@@ -33,6 +33,24 @@ function makeRuntimeMetadata() {
     };
 }
 
+function makeInventorySession(overrides: Record<string, unknown> = {}) {
+    return {
+        canonicalSessionKey: 'machine-1:instance-1:broker-sess-1',
+        instanceId: 'instance-1',
+        brokerSessionId: 'broker-sess-1',
+        providerSessionKey: 'provider-sess-1',
+        provider: 'claude',
+        title: 'Attach me',
+        attachability: 'attachable',
+        capabilities: ['sendUserMessage'],
+        degradedFlags: [],
+        lastActiveAt: 123,
+        messagePreview: 'Fix the broker',
+        ...makeRuntimeMetadata(),
+        ...overrides,
+    };
+}
+
 describe('broker session ops', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -41,15 +59,7 @@ describe('broker session ops', () => {
     it('calls the machine broker list RPC', async () => {
         machineRPCMock.mockResolvedValue({
             sessions: [
-                {
-                    brokerSessionId: 'broker-sess-1',
-                    provider: 'claude',
-                    title: 'Attach me',
-                    attachability: 'attachable',
-                    capabilities: ['sendUserMessage'],
-                    degradedFlags: [],
-                    ...makeRuntimeMetadata(),
-                },
+                makeInventorySession(),
             ],
         });
 
@@ -62,6 +72,8 @@ describe('broker session ops', () => {
         );
         expect(result.sessions[0].provider).toBe('claude');
         expect(result.sessions[0]).toMatchObject({
+            canonicalSessionKey: 'machine-1:instance-1:broker-sess-1',
+            instanceId: 'instance-1',
             desiredMode: 'runtime_preferred',
             effectiveMode: 'runtime',
         });
@@ -70,15 +82,7 @@ describe('broker session ops', () => {
     it('filters invalid broker session DTOs instead of failing the whole list', async () => {
         machineRPCMock.mockResolvedValue({
             sessions: [
-                {
-                    brokerSessionId: 'broker-sess-1',
-                    provider: 'claude',
-                    title: 'Attach me',
-                    attachability: 'attachable',
-                    capabilities: ['sendUserMessage'],
-                    degradedFlags: [],
-                    ...makeRuntimeMetadata(),
-                },
+                makeInventorySession(),
                 {
                     brokerSessionId: 'broker-sess-2',
                     provider: 'not-a-provider',
@@ -92,15 +96,7 @@ describe('broker session ops', () => {
 
         await expect(machineListBrokerSessions('machine-1')).resolves.toEqual({
             sessions: [
-                {
-                    brokerSessionId: 'broker-sess-1',
-                    provider: 'claude',
-                    title: 'Attach me',
-                    attachability: 'attachable',
-                    capabilities: ['sendUserMessage'],
-                    degradedFlags: [],
-                    ...makeRuntimeMetadata(),
-                },
+                makeInventorySession(),
             ],
         });
     });
@@ -113,18 +109,26 @@ describe('broker session ops', () => {
         );
     });
 
-    it('calls the machine broker attach RPC with the selected broker session id', async () => {
+    it('calls the machine broker attach RPC with canonical routing fields', async () => {
         machineRPCMock.mockResolvedValue({
             type: 'success',
             sessionId: 'happy-sess-1',
         });
 
-        const result = await machineAttachBrokerSession('machine-1', 'broker-sess-1');
+        const result = await machineAttachBrokerSession('machine-1', {
+            canonicalSessionKey: 'machine-1:instance-1:broker-sess-1',
+            instanceId: 'instance-1',
+            brokerSessionId: 'broker-sess-1',
+        });
 
         expect(machineRPCMock).toHaveBeenCalledWith(
             'machine-1',
             'broker-attach-session',
-            { brokerSessionId: 'broker-sess-1' },
+            {
+                canonicalSessionKey: 'machine-1:instance-1:broker-sess-1',
+                instanceId: 'instance-1',
+                brokerSessionId: 'broker-sess-1',
+            },
         );
         expect(result).toEqual({
             type: 'success',

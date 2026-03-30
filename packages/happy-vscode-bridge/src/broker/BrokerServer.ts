@@ -11,7 +11,6 @@ import type {
   BridgeBrokerSnapshot,
 } from '../runtime/types';
 
-import type { BrokerManifestStore } from './BrokerManifestStore';
 import {
   createBrokerRpcError,
   createBrokerRpcNotification,
@@ -52,7 +51,6 @@ export type BrokerAdapterHost = {
 
 export type BrokerServerOptions = {
   adapterHost: BrokerAdapterHost;
-  manifestStore: BrokerManifestStore;
   store: SharedSessionStore;
   host?: string;
   port?: number;
@@ -290,8 +288,6 @@ export class BrokerServer {
     const address = httpServer.address();
     const port = typeof address === 'object' && address ? address.port : 0;
     const url = `ws://${host}:${port}?token=${token}`;
-
-    await options.manifestStore.write({ port, token });
 
     return new BrokerServer(httpServer, socketServer, port, token, url);
   }

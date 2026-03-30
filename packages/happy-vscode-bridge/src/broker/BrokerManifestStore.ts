@@ -1,18 +1,40 @@
 import { dirname, join } from 'path';
-import { mkdir, readFile, writeFile } from 'fs/promises';
+import { homedir } from 'os';
+import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 
-export interface BrokerInstanceManifest {
-  port: number;
-  token: string;
-  address?: string;
-  version?: string;
+import {
+  brokerInstanceManifestSchema,
+  type BrokerInstanceManifest,
+} from '../../../happy-wire/src/brokerProtocol';
+
+type BrokerManifestStoreOptions = {
+  happyHomeDir?: string;
+};
+
+function resolveManifestPath(
+  pathOrDir: string,
+): string {
+  return pathOrDir.endsWith('.json')
+    ? pathOrDir
+    : join(pathOrDir, 'broker', 'instance.json');
 }
 
 export class BrokerManifestStore {
   private readonly file: string;
 
-  constructor(rootDir: string) {
-    this.file = join(rootDir, 'broker', 'instance.json');
+  constructor(pathOrDir: string) {
+    this.file = resolveManifestPath(pathOrDir);
+  }
+
+  static forInstance(
+    instanceId: string,
+    options?: BrokerManifestStoreOptions,
+  ): BrokerManifestStore {
+    const happyHomeDir =
+      options?.happyHomeDir ?? process.env.HAPPY_HOME_DIR ?? join(homedir(), '.happy');
+    return new BrokerManifestStore(
+      join(happyHomeDir, 'bridges', 'vscode', 'instances', `${instanceId}.json`),
+    );
   }
 
   getPath() {
@@ -27,13 +49,17 @@ export class BrokerManifestStore {
   async read(): Promise<BrokerInstanceManifest | undefined> {
     try {
       const contents = await readFile(this.file, 'utf-8');
-      return JSON.parse(contents) as BrokerInstanceManifest;
+      return brokerInstanceManifestSchema.parse(JSON.parse(contents));
     } catch (error: unknown) {
       if (isErrnoException(error) && error.code === 'ENOENT') {
         return undefined;
       }
       throw error;
     }
+  }
+
+  async delete(): Promise<void> {
+    await rm(this.file, { force: true });
   }
 }
 

@@ -12,6 +12,7 @@ export interface TrackedSession {
   startedBy: 'daemon' | string;
   source?: 'direct' | 'broker_attached';
   brokerSessionId?: string;
+  canonicalBrokerSessionKey?: string;
   happySessionId?: string;
   happySessionMetadataFromLocalWebhook?: Metadata;
   pid: number;

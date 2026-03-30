@@ -10,8 +10,12 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"],
     "baseUrl": ".",
-    "rootDir": "src",
-    "outDir": "dist"
+    "rootDir": "..",
+    "outDir": "dist",
+    "paths": {
+      "happy-wire": ["../happy-wire/src/index.ts"],
+      "happy-wire/*": ["../happy-wire/src/*"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../happy-wire/src"]
 }

@@ -1,6 +1,6 @@
 export function buildBrokerSessionTag(opts: {
   machineId: string;
-  brokerSessionId: string;
+  canonicalSessionKey: string;
 }): string {
-  return `broker:${opts.machineId}:${opts.brokerSessionId}`;
+  return `vscode-broker:${opts.machineId}:${opts.canonicalSessionKey}`;
 }

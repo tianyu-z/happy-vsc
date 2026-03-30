@@ -80,6 +80,17 @@ describe('createSessionMetadata broker projection', () => {
       startedBy: 'terminal',
       source: 'broker_attached',
       brokerSessionId: 'broker-sess-1',
+      transport: {
+        kind: 'vscode-broker',
+        brokerMachineId: 'machine-1',
+        brokerInstanceId: 'instance-1',
+        brokerSessionId: 'broker-sess-1',
+        canonicalBrokerSessionKey: 'machine-1:instance-1:broker-sess-1',
+        runtimeKind: 'ssh',
+        runtimeLabel: 'ssh:gpu-1',
+        windowLabel: 'api',
+        preferredHostIp: '10.0.0.2',
+      },
       brokerCapabilities: ['sendUserMessage'],
       brokerDegradedFlags: ['missing_editor_context'],
       brokerDesiredMode: 'runtime_preferred',
@@ -103,6 +114,16 @@ describe('createSessionMetadata broker projection', () => {
     expect(metadata.brokerDesiredMode).toBe('runtime_preferred');
     expect(metadata.brokerEffectiveMode).toBe('runtime');
     expect(metadata.brokerModeReason).toBe('runtime_ready');
+    expect(metadata.transportKind).toBe('vscode-broker');
+    expect(metadata.brokerMachineId).toBe('machine-1');
+    expect(metadata.brokerInstanceId).toBe('instance-1');
+    expect(metadata.canonicalBrokerSessionKey).toBe(
+      'machine-1:instance-1:broker-sess-1',
+    );
+    expect(metadata.runtimeKind).toBe('ssh');
+    expect(metadata.runtimeLabel).toBe('ssh:gpu-1');
+    expect(metadata.windowLabel).toBe('api');
+    expect(metadata.preferredHostIp).toBe('10.0.0.2');
   });
 });
 

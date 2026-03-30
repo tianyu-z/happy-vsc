@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
     canAttachBrokerSession,
+    flattenBrokerSessions,
+    formatBrokerRowSubtitle,
     getBrokerSessionAttachabilityLabel,
     getBrokerSessionAttachActionLabel,
     getBrokerSessionBadge,
@@ -13,6 +15,195 @@ import {
 
 describe('brokerSessionUtils', () => {
     const translate = (key: string): string => `t:${key}`;
+
+    it('flattens online broker inventory across machines into a single active list', () => {
+        const sessions = flattenBrokerSessions([
+            {
+                id: 'machine-1',
+                metadata: {
+                    host: 'gpu-1',
+                    displayName: 'GPU Box',
+                    platform: 'linux',
+                    happyCliVersion: '1.0.0',
+                    happyHomeDir: '/home/me/.happy',
+                    homeDir: '/home/me',
+                },
+                daemonState: {
+                    brokerInventory: {
+                        updatedAt: 100,
+                        instances: [
+                            {
+                                installationId: 'install-1',
+                                instanceId: 'inst-1',
+                                logicalWindowKey: 'win-1',
+                                windowLabel: 'api',
+                                workspaceFolders: ['/workspace/api'],
+                                runtimeKind: 'ssh',
+                                runtimeLabel: 'ssh:gpu-1',
+                                bridgeHostIps: ['10.0.0.2'],
+                                preferredHostIp: '10.0.0.2',
+                                providerKinds: ['codex'],
+                                startedAt: 1,
+                                lastSeenAt: 100,
+                                ttlMs: 10_000,
+                                status: 'online',
+                            },
+                            {
+                                installationId: 'install-1',
+                                instanceId: 'inst-shadowed',
+                                logicalWindowKey: 'win-shadowed',
+                                windowLabel: 'shadowed',
+                                workspaceFolders: ['/workspace/shadowed'],
+                                runtimeKind: 'ssh',
+                                runtimeLabel: 'ssh:gpu-1',
+                                bridgeHostIps: ['10.0.0.2'],
+                                providerKinds: ['claude'],
+                                startedAt: 1,
+                                lastSeenAt: 100,
+                                ttlMs: 10_000,
+                                status: 'shadowed',
+                            },
+                        ],
+                        sessions: [
+                            {
+                                canonicalSessionKey: 'machine-1:inst-1:sess-1',
+                                instanceId: 'inst-1',
+                                brokerSessionId: 'sess-1',
+                                providerSessionKey: 'provider-1',
+                                provider: 'codex',
+                                title: 'Fix API',
+                                attachability: 'attachable',
+                                capabilities: ['sendUserMessage'],
+                                degradedFlags: [],
+                                desiredMode: 'runtime_preferred',
+                                effectiveMode: 'runtime',
+                                modeReason: 'runtime_ready',
+                                compatibility: 'supported',
+                                providerExtension: {
+                                    id: 'openai.chatgpt',
+                                    version: '1.0.0',
+                                },
+                                probeHealth: {
+                                    runtime: 'ready',
+                                    storage: 'ready',
+                                },
+                                lastActiveAt: 50,
+                            },
+                            {
+                                canonicalSessionKey: 'machine-1:inst-shadowed:sess-shadowed',
+                                instanceId: 'inst-shadowed',
+                                brokerSessionId: 'sess-shadowed',
+                                providerSessionKey: 'provider-shadowed',
+                                provider: 'claude',
+                                title: 'Shadowed Session',
+                                attachability: 'attachable',
+                                capabilities: ['sendUserMessage'],
+                                degradedFlags: [],
+                                desiredMode: 'runtime_preferred',
+                                effectiveMode: 'runtime',
+                                modeReason: 'runtime_ready',
+                                compatibility: 'supported',
+                                providerExtension: {
+                                    id: 'anthropic.claude-code',
+                                    version: '1.0.0',
+                                },
+                                probeHealth: {
+                                    runtime: 'ready',
+                                    storage: 'ready',
+                                },
+                                lastActiveAt: 60,
+                            },
+                        ],
+                    },
+                },
+            } as any,
+            {
+                id: 'machine-2',
+                metadata: {
+                    host: 'build-box',
+                    platform: 'linux',
+                    happyCliVersion: '1.0.0',
+                    happyHomeDir: '/home/me/.happy',
+                    homeDir: '/home/me',
+                },
+                daemonState: {
+                    brokerInventory: {
+                        updatedAt: 100,
+                        instances: [
+                            {
+                                installationId: 'install-2',
+                                instanceId: 'inst-2',
+                                logicalWindowKey: 'win-2',
+                                windowLabel: 'web',
+                                workspaceFolders: ['/workspace/web'],
+                                runtimeKind: 'wsl',
+                                runtimeLabel: 'wsl:build-box',
+                                bridgeHostIps: ['172.20.10.5'],
+                                preferredHostIp: '172.20.10.5',
+                                providerKinds: ['claude'],
+                                startedAt: 1,
+                                lastSeenAt: 100,
+                                ttlMs: 10_000,
+                                status: 'online',
+                            },
+                        ],
+                        sessions: [
+                            {
+                                canonicalSessionKey: 'machine-2:inst-2:sess-2',
+                                instanceId: 'inst-2',
+                                brokerSessionId: 'sess-2',
+                                providerSessionKey: 'provider-2',
+                                provider: 'claude',
+                                title: 'Review web',
+                                attachability: 'attachable',
+                                capabilities: ['sendUserMessage'],
+                                degradedFlags: [],
+                                desiredMode: 'runtime_preferred',
+                                effectiveMode: 'runtime',
+                                modeReason: 'runtime_ready',
+                                compatibility: 'supported',
+                                providerExtension: {
+                                    id: 'anthropic.claude-code',
+                                    version: '1.0.0',
+                                },
+                                probeHealth: {
+                                    runtime: 'ready',
+                                    storage: 'ready',
+                                },
+                                lastActiveAt: 70,
+                            },
+                        ],
+                    },
+                },
+            } as any,
+        ]);
+
+        expect(sessions.map((session) => session.canonicalSessionKey)).toEqual([
+            'machine-2:inst-2:sess-2',
+            'machine-1:inst-1:sess-1',
+        ]);
+        expect(sessions[0]).toMatchObject({
+            machineId: 'machine-2',
+            machineLabel: 'build-box',
+            windowLabel: 'web',
+            runtimeLabel: 'wsl:build-box',
+            preferredHostIp: '172.20.10.5',
+        });
+    });
+
+    it('formats live session subtitles as runtime plus machine, window, and ip', () => {
+        expect(formatBrokerRowSubtitle({
+            runtimeLabel: 'ssh:gpu-1',
+            machineLabel: 'gpu-1',
+            windowLabel: 'api',
+            preferredHostIp: '10.0.0.2',
+        })).toBe('ssh:gpu-1\ngpu-1 • api • 10.0.0.2');
+
+        expect(formatBrokerRowSubtitle({
+            runtimeLabel: 'local',
+            machineLabel: 'macbook',
+        })).toBe('local\nmacbook');
+    });
 
     it('labels broker-attached sessions as broker-backed', () => {
         expect(getBrokerSessionBadge({
