@@ -6,7 +6,7 @@ import { useAllMachines, storage, useSessionModeLastUsed, useSetting, useSetting
 import { Ionicons, Octicons } from '@expo/vector-icons';
 import { ItemGroup } from '@/components/ItemGroup';
 import { Item } from '@/components/Item';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, usePathname } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { useUnistyles } from 'react-native-unistyles';
 import { layout } from '@/components/layout';
@@ -49,6 +49,7 @@ import { MODEL_MODE_DEFAULT, isModelModeForAgent } from 'happy-wire';
 import { FolderPickerSheet } from '@/components/FolderPickerSheet';
 import { BottomSheetModal } from '@gorhom/bottom-sheet';
 import { handleImagePasteEvent } from '@/utils/imagePaste';
+import { createSessionHref } from '@/utils/sessionNavigation';
 
 // Simple temporary state for passing selections back from picker screens
 let onMachineSelected: (machineId: string) => void = () => { };
@@ -270,6 +271,7 @@ const styles = StyleSheet.create((theme, rt) => ({
 function NewSessionWizard() {
     const { theme, rt } = useUnistyles();
     const router = useRouter();
+    const pathname = usePathname();
     const safeArea = useSafeAreaInsets();
     const { height: kbHeight, progress: kbProgress } = useReanimatedKeyboardAnimation();
     const animatedInputStyle = useAnimatedStyle(() => ({
@@ -1408,7 +1410,7 @@ function NewSessionWizard() {
                     clearImages();
                 }
 
-                router.replace(`/session/${result.sessionId}`, {
+                router.replace(createSessionHref(result.sessionId, pathname), {
                     dangerouslySingular() {
                         return 'session'
                     },
@@ -1429,7 +1431,7 @@ function NewSessionWizard() {
             Modal.alert(t('common.error'), errorMessage);
             setIsCreating(false);
         }
-    }, [selectedMachineId, selectedPath, sessionPrompt, sessionType, agentType, selectedProfileId, permissionMode, modelMode, fastMode, recentMachinePaths, profileMap, router, images, clearImages, tempSessionData, selectedRepos]);
+    }, [selectedMachineId, selectedPath, sessionPrompt, sessionType, agentType, selectedProfileId, permissionMode, modelMode, fastMode, recentMachinePaths, profileMap, router, pathname, images, clearImages, tempSessionData, selectedRepos]);
 
     const screenWidth = useWindowDimensions().width;
 

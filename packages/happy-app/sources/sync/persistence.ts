@@ -404,3 +404,15 @@ export function saveSharedByMeCache(userId: string, data: any[]): void {
 export function clearPersistence() {
     mmkv.clearAll();
 }
+
+export function resetLocalPersistence(): void {
+    // Server config uses a separate MMKV instance and is intentionally preserved.
+    clearPersistence();
+}
+
+export async function resetLocalPersistenceAndAuth(
+    removeCredentials: () => Promise<boolean>,
+): Promise<void> {
+    resetLocalPersistence();
+    await removeCredentials();
+}

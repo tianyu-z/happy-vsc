@@ -20,6 +20,7 @@ class Configuration {
   public readonly logsDir: string
   public readonly settingsFile: string
   public readonly privateKeyFile: string
+  public readonly sessionDataKeysFile: string
   public readonly daemonStateFile: string
   public readonly daemonLockFile: string
   public readonly currentCliVersion: string
@@ -48,6 +49,7 @@ class Configuration {
     this.logsDir = join(this.happyHomeDir, 'logs')
     this.settingsFile = join(this.happyHomeDir, 'settings.json')
     this.privateKeyFile = join(this.happyHomeDir, 'access.key')
+    this.sessionDataKeysFile = join(this.happyHomeDir, 'session-data-keys.json')
     this.daemonStateFile = join(this.happyHomeDir, 'daemon.state.json')
     this.daemonLockFile = join(this.happyHomeDir, 'daemon.state.json.lock')
 

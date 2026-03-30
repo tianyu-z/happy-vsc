@@ -1,0 +1,808 @@
+import { describe, expect, it, vi } from 'vitest';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { activate, deactivate } from './extension';
+
+function createRuntimeStub() {
+  return {
+    refresh: vi.fn(async () => []),
+    listDiscoveredSessions: vi.fn(() => []),
+    listProviderDiagnostics: vi.fn(() => []),
+    setSessionDesiredMode: vi.fn(async () => {
+      throw new Error('not needed');
+    }),
+    subscribe: vi.fn(() => () => {}),
+    dispose: vi.fn(async () => {}),
+  };
+}
+
+function createWindowStub() {
+  return {
+    createTreeView: vi.fn(() => ({
+      dispose: vi.fn(),
+    })),
+    createStatusBarItem: vi.fn(() => ({
+      text: '',
+      show: vi.fn(),
+      hide: vi.fn(),
+      dispose: vi.fn(),
+    })),
+  };
+}
+
+async function readJson(path: string) {
+  return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+}
+
+describe('bridge extension entrypoint', () => {
+  it('declares a VS Code extension entrypoint', async () => {
+    const pkgPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '..',
+      'package.json',
+    );
+    const pkg = JSON.parse(await readFile(pkgPath, 'utf8')) as {
+      main?: unknown;
+      publisher?: unknown;
+      engines?: { vscode?: unknown };
+      contributes?: {
+        commands?: Array<{
+          command?: unknown;
+          title?: unknown;
+        }>;
+        viewsWelcome?: Array<{
+          view?: unknown;
+          contents?: unknown;
+        }>;
+        menus?: Record<
+          string,
+          Array<{
+            command?: unknown;
+            when?: unknown;
+          }>
+        >;
+      };
+    };
+    expect(pkg.engines?.vscode).toBeTruthy();
+    expect(pkg.publisher).toBe('happy');
+    expect(typeof pkg.main).toBe('string');
+    expect(pkg.main).toContain('dist/');
+    expect(pkg.activationEvents).toContain('*');
+    expect(
+      pkg.contributes?.commands?.some(
+        (item) => item.command === 'happyVscodeBridge.diagnoseProviders',
+      ),
+    ).toBe(true);
+    expect(
+      pkg.contributes?.viewsWelcome?.some(
+        (item) =>
+          item.view === 'happyVscodeBridge.sessions' &&
+          String(item.contents).includes('Refresh Sessions'),
+      ),
+    ).toBe(true);
+    expect(
+      pkg.contributes?.menus?.['view/title']?.some(
+        (item) =>
+          item.command === 'happyVscodeBridge.refreshSessions' &&
+          item.when === 'view == happyVscodeBridge.sessions',
+      ),
+    ).toBe(true);
+  });
+
+  it('exports VS Code lifecycle hooks', () => {
+    expect(typeof activate).toBe('function');
+    expect(typeof deactivate).toBe('function');
+  });
+
+  it('keeps Extension Development Host compatible with official provider extensions', async () => {
+    const launchPath = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '..',
+      '..',
+      '..',
+      '.vscode',
+      'launch.json',
+    );
+    const launch = JSON.parse(await readFile(launchPath, 'utf8')) as {
+      configurations?: Array<{
+        name?: string;
+        args?: unknown[];
+      }>;
+    };
+    const config = launch.configurations?.find(
+      (candidate) => candidate.name === 'Happy Companion Bridge: Extension Host',
+    );
+    const args = config?.args?.map((value) => String(value)) ?? [];
+
+    expect(args).not.toContain('--disable-extensions');
+    expect(args).toContain('--disable-extension=happy.happy-vscode-bridge');
+    expect(args).toContain(
+      '--disable-extension=undefined_publisher.happy-vscode-bridge',
+    );
+  });
+
+  it('activates the broker with a real companion runtime and ui wiring', async () => {
+    const runtime = createRuntimeStub();
+    const vscode = {
+      commands: {
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      window: createWindowStub(),
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: '/tmp/happy-vscode-bridge',
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    const result = await activate(context, {
+      runtime: runtime as never,
+      token: 'test-token',
+      vscode: vscode as never,
+    });
+
+    expect(result.started).toBe(true);
+    expect(result.commands).toContain('happyVscodeBridge.switchSessionMode');
+    expect(result.commands).toContain('happyVscodeBridge.diagnoseProviders');
+    expect(vscode.window.createTreeView).toHaveBeenCalledTimes(1);
+    expect(vscode.window.createStatusBarItem).toHaveBeenCalledTimes(1);
+    expect(context.subscriptions.length).toBeGreaterThan(1);
+
+    await deactivate();
+  });
+
+  it('writes only the compatibility alias when no real window instance id is available', async () => {
+    const runtime = createRuntimeStub();
+    const rootDir = await mkdtemp(join(tmpdir(), 'happy-vscode-bridge-'));
+    const vscode = {
+      commands: {
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      window: {
+        ...createWindowStub(),
+        state: {
+          focused: false,
+        },
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: rootDir,
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    const result = await activate(context, {
+      runtime: runtime as never,
+      token: 'test-token',
+      vscode: vscode as never,
+    });
+
+    await expect(readJson(result.manifestPath)).resolves.toMatchObject({
+      windowInstanceId: 'default-window',
+      isActiveWindow: false,
+      windowLastActiveAt: null,
+    });
+    await expect(access(join(rootDir, 'broker', 'instances'))).rejects.toBeTruthy();
+
+    await deactivate();
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  it('rewrites broker manifests when window focus changes', async () => {
+    const runtime = createRuntimeStub();
+    const rootDir = await mkdtemp(join(tmpdir(), 'happy-vscode-bridge-'));
+    let onWindowStateChange:
+      | ((state: { focused: boolean }) => void)
+      | undefined;
+    const vscode = {
+      commands: {
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      env: {
+        sessionId: 'window-a',
+      },
+      window: {
+        ...createWindowStub(),
+        state: {
+          focused: false,
+        },
+        onDidChangeWindowState: vi.fn(
+          (handler: (state: { focused: boolean }) => void) => {
+            onWindowStateChange = handler;
+            return {
+              dispose: vi.fn(),
+            };
+          },
+        ),
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: rootDir,
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    const result = await activate(context, {
+      runtime: runtime as never,
+      token: 'test-token',
+      vscode: vscode as never,
+    });
+    const perWindowPath = join(rootDir, 'broker', 'instances', 'window-a.json');
+
+    await expect(access(perWindowPath, constants.F_OK)).resolves.toBeUndefined();
+    await expect(readJson(result.manifestPath)).resolves.toMatchObject({
+      windowInstanceId: 'window-a',
+      isActiveWindow: false,
+      windowLastActiveAt: null,
+    });
+
+    vscode.window.state.focused = true;
+    onWindowStateChange?.({ focused: true });
+
+    let lastActiveAt: string | null = null;
+    await vi.waitFor(async () => {
+      const aliasManifest = await readJson(result.manifestPath);
+      const perWindowManifest = await readJson(perWindowPath);
+
+      expect(aliasManifest).toMatchObject({
+        windowInstanceId: 'window-a',
+        isActiveWindow: true,
+      });
+      expect(perWindowManifest).toMatchObject({
+        windowInstanceId: 'window-a',
+        isActiveWindow: true,
+      });
+      expect(typeof aliasManifest.windowLastActiveAt).toBe('string');
+      expect(typeof perWindowManifest.windowLastActiveAt).toBe('string');
+      lastActiveAt = aliasManifest.windowLastActiveAt as string;
+    });
+
+    vscode.window.state.focused = false;
+    onWindowStateChange?.({ focused: false });
+
+    await vi.waitFor(async () => {
+      const aliasManifest = await readJson(result.manifestPath);
+      const perWindowManifest = await readJson(perWindowPath);
+
+      expect(aliasManifest).toMatchObject({
+        windowInstanceId: 'window-a',
+        isActiveWindow: false,
+        windowLastActiveAt: lastActiveAt,
+      });
+      expect(perWindowManifest).toMatchObject({
+        windowInstanceId: 'window-a',
+        isActiveWindow: false,
+        windowLastActiveAt: lastActiveAt,
+      });
+    });
+
+    await deactivate();
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  it('wires default probe factories into runtime creation', async () => {
+    const runtime = {
+      refresh: vi.fn(async () => []),
+      listDiscoveredSessions: vi.fn(() => []),
+      listProviderDiagnostics: vi.fn(() => []),
+      setSessionDesiredMode: vi.fn(async () => {
+        throw new Error('not needed');
+      }),
+      subscribe: vi.fn(() => () => {}),
+      dispose: vi.fn(async () => {}),
+    };
+    const createRuntime = vi.fn(async (_options) => runtime);
+    const vscode = {
+      commands: {
+        getCommands: vi.fn(async () => []),
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      window: {
+        createTreeView: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+        createStatusBarItem: vi.fn(() => ({
+          text: '',
+          show: vi.fn(),
+          hide: vi.fn(),
+          dispose: vi.fn(),
+        })),
+      },
+      extensions: [],
+      workspace: {
+        workspaceFolders: [
+          {
+            uri: {
+              toString: () => 'file:///workspace',
+            },
+          },
+        ],
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: '/tmp/happy-vscode-bridge',
+      },
+      logUri: {
+        fsPath: '/tmp/logs/20260324T000449/exthost6/happy.happy-vscode-bridge',
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    await activate(context, {
+      createRuntime,
+      token: 'test-token',
+      vscode: vscode as never,
+    });
+
+    expect(createRuntime).toHaveBeenCalledTimes(1);
+    expect(createRuntime.mock.calls[0]?.[0]).toMatchObject({
+      probeFactories: expect.objectContaining({
+        claude: expect.any(Function),
+        codex: expect.any(Function),
+      }),
+    });
+
+    await deactivate();
+  });
+
+  it('passes VS Code tabs into the default Codex probe factory', async () => {
+    const runtime = {
+      refresh: vi.fn(async () => []),
+      listDiscoveredSessions: vi.fn(() => []),
+      listProviderDiagnostics: vi.fn(() => []),
+      setSessionDesiredMode: vi.fn(async () => {
+        throw new Error('not needed');
+      }),
+      subscribe: vi.fn(() => () => {}),
+      dispose: vi.fn(async () => {}),
+    };
+    const createRuntime = vi.fn(async (options) => {
+      const probes = await options.probeFactories.codex({
+        provider: 'codex',
+        compatibility: 'supported',
+        activationState: 'active',
+        providerExtension: {
+          id: 'openai.chatgpt',
+          version: '26.318.11754',
+        },
+        commands: [
+          'vscode.openWith',
+          'type',
+          'workbench.action.chat.focusInput',
+          'workbench.action.chat.submit',
+          'workbench.action.chat.cancel',
+        ],
+        contextKeys: [],
+        exportKeys: [],
+        host: null,
+      });
+
+      const sessions = await probes.runtimeProbe?.discoverSessions();
+      expect(sessions).toEqual([
+        expect.objectContaining({
+          providerSessionRef: '019d1fcb-5c1d-7c39-8df7-0f85f6e5c001',
+          title: 'Investigate codex discovery',
+        }),
+      ]);
+
+      return runtime;
+    });
+    const vscode = {
+      commands: {
+        getCommands: vi.fn(async () => []),
+        executeCommand: vi.fn(async () => undefined),
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      window: {
+        createTreeView: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+        createStatusBarItem: vi.fn(() => ({
+          text: '',
+          show: vi.fn(),
+          hide: vi.fn(),
+          dispose: vi.fn(),
+        })),
+        tabGroups: {
+          all: [
+            {
+              tabs: [
+                {
+                  label: 'Investigate codex discovery',
+                  input: {
+                    uri: {
+                      scheme: 'openai-codex',
+                      authority: 'route',
+                      path: '/local/019d1fcb-5c1d-7c39-8df7-0f85f6e5c001',
+                      fsPath: '/local/019d1fcb-5c1d-7c39-8df7-0f85f6e5c001',
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+      extensions: [],
+      workspace: {
+        workspaceFolders: [
+          {
+            uri: {
+              toString: () => 'file:///workspace',
+            },
+          },
+        ],
+      },
+      Uri: {
+        parse: (value: string) => ({ value }),
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: '/tmp/happy-vscode-bridge',
+      },
+      logUri: {
+        fsPath: '/tmp/logs/20260324T000449/exthost6/happy.happy-vscode-bridge',
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    await activate(context, {
+      createRuntime,
+      token: 'test-token',
+      vscode: vscode as never,
+    });
+
+    expect(createRuntime).toHaveBeenCalledTimes(1);
+
+    await deactivate();
+  });
+
+  it('eagerly activates supported provider extensions while capture hooks are installed', async () => {
+    const runtime = {
+      refresh: vi.fn(async () => []),
+      listDiscoveredSessions: vi.fn(() => []),
+      listProviderDiagnostics: vi.fn(() => []),
+      setSessionDesiredMode: vi.fn(async () => {
+        throw new Error('not needed');
+      }),
+      subscribe: vi.fn(() => () => {}),
+      dispose: vi.fn(async () => {}),
+    };
+    const createRuntime = vi.fn(async () => runtime);
+    const activateClaude = vi.fn(async () => undefined);
+    const activateCodex = vi.fn(async () => undefined);
+    const vscode = {
+      commands: {
+        getCommands: vi.fn(async () => []),
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      window: {
+        createTreeView: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+        createStatusBarItem: vi.fn(() => ({
+          text: '',
+          show: vi.fn(),
+          hide: vi.fn(),
+          dispose: vi.fn(),
+        })),
+        registerWebviewViewProvider: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+        registerCustomEditorProvider: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      extensions: [
+        {
+          id: 'anthropic.claude-code',
+          isActive: false,
+          packageJSON: {
+            version: '2.1.81',
+          },
+          activate: activateClaude,
+        },
+        {
+          id: 'openai.chatgpt',
+          isActive: false,
+          packageJSON: {
+            version: '26.318.11754',
+          },
+          activate: activateCodex,
+        },
+      ],
+      workspace: {
+        workspaceFolders: [
+          {
+            uri: {
+              toString: () => 'file:///workspace',
+            },
+          },
+        ],
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: '/tmp/happy-vscode-bridge',
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    await activate(context, {
+      createRuntime,
+      token: 'test-token',
+      vscode: vscode as never,
+    });
+
+    expect(activateClaude).toHaveBeenCalledTimes(1);
+    expect(activateCodex).toHaveBeenCalledTimes(1);
+
+    await deactivate();
+  });
+
+  it('installs shared capture before eager provider activation', async () => {
+    const runtime = {
+      refresh: vi.fn(async () => []),
+      listDiscoveredSessions: vi.fn(() => []),
+      listProviderDiagnostics: vi.fn(() => []),
+      setSessionDesiredMode: vi.fn(async () => {
+        throw new Error('not needed');
+      }),
+      subscribe: vi.fn(() => () => {}),
+      dispose: vi.fn(async () => {}),
+    };
+    const createRuntime = vi.fn(async () => runtime);
+    const order: string[] = [];
+    const sharedCapture = {
+      diagnostics: {
+        installed: true,
+        targetKind: 'instance' as const,
+      },
+      dispose: vi.fn(),
+    };
+    const vscode = {
+      commands: {
+        getCommands: vi.fn(async () => []),
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      window: {
+        createTreeView: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+        createStatusBarItem: vi.fn(() => ({
+          text: '',
+          show: vi.fn(),
+          hide: vi.fn(),
+          dispose: vi.fn(),
+        })),
+      },
+      extensions: [],
+      workspace: {
+        workspaceFolders: [
+          {
+            uri: {
+              toString: () => 'file:///workspace',
+            },
+          },
+        ],
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: '/tmp/happy-vscode-bridge',
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    await activate(context, {
+      createRuntime,
+      token: 'test-token',
+      vscode: vscode as never,
+      installSharedCapture: () => {
+        order.push('capture');
+        return sharedCapture;
+      },
+      eagerlyActivateProviders: async () => {
+        order.push('providers');
+      },
+    } as never);
+
+    expect(order).toEqual(['capture', 'providers']);
+    expect(context.subscriptions).toContain(sharedCapture);
+
+    await deactivate();
+  });
+
+  it('runs shared capture discovery against the original vscode registration functions', async () => {
+    const runtime = {
+      refresh: vi.fn(async () => []),
+      listDiscoveredSessions: vi.fn(() => []),
+      listProviderDiagnostics: vi.fn(() => []),
+      setSessionDesiredMode: vi.fn(async () => {
+        throw new Error('not needed');
+      }),
+      subscribe: vi.fn(() => () => {}),
+      dispose: vi.fn(async () => {}),
+    };
+    const createRuntime = vi.fn(async () => runtime);
+    const originalRegisterWebviewViewProvider = vi.fn(() => ({
+      dispose: vi.fn(),
+    }));
+    const originalRegisterCustomEditorProvider = vi.fn(() => ({
+      dispose: vi.fn(),
+    }));
+    const vscode = {
+      commands: {
+        getCommands: vi.fn(async () => []),
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      window: {
+        createTreeView: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+        createStatusBarItem: vi.fn(() => ({
+          text: '',
+          show: vi.fn(),
+          hide: vi.fn(),
+          dispose: vi.fn(),
+        })),
+        registerWebviewViewProvider: originalRegisterWebviewViewProvider,
+        registerCustomEditorProvider: originalRegisterCustomEditorProvider,
+        get nativeHandle() {
+          throw new Error('nativeHandle getter should not be touched');
+        },
+      },
+      extensions: [],
+      workspace: {
+        workspaceFolders: [
+          {
+            uri: {
+              toString: () => 'file:///workspace',
+            },
+          },
+        ],
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: '/tmp/happy-vscode-bridge',
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    await activate(context, {
+      createRuntime,
+      token: 'test-token',
+      vscode: vscode as never,
+      installSharedCapture: ({ vscode: captureVscode }) => {
+        expect(
+          captureVscode.window?.registerWebviewViewProvider,
+        ).toBe(originalRegisterWebviewViewProvider);
+        expect(
+          captureVscode.window?.registerCustomEditorProvider,
+        ).toBe(originalRegisterCustomEditorProvider);
+        expect(captureVscode.window?.registerWebviewViewProvider).not.toBe(
+          vscode.window.registerWebviewViewProvider,
+        );
+        expect(captureVscode.window?.registerCustomEditorProvider).not.toBe(
+          vscode.window.registerCustomEditorProvider,
+        );
+
+        return {
+          diagnostics: {
+            installed: false,
+            targetKind: null,
+            failureReason: 'test',
+          },
+          dispose: vi.fn(),
+        };
+      },
+    } as never);
+
+    await deactivate();
+  });
+
+  it('passes the original vscode chat registration function into shared capture discovery', async () => {
+    const runtime = {
+      refresh: vi.fn(async () => []),
+      listDiscoveredSessions: vi.fn(() => []),
+      listProviderDiagnostics: vi.fn(() => []),
+      setSessionDesiredMode: vi.fn(async () => {
+        throw new Error('not needed');
+      }),
+      subscribe: vi.fn(() => () => {}),
+      dispose: vi.fn(async () => {}),
+    };
+    const createRuntime = vi.fn(async () => runtime);
+    const originalRegisterChatSessionItemProvider = vi.fn(() => ({
+      dispose: vi.fn(),
+    }));
+    const vscode = {
+      commands: {
+        getCommands: vi.fn(async () => []),
+        registerCommand: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+      },
+      window: {
+        createTreeView: vi.fn(() => ({
+          dispose: vi.fn(),
+        })),
+        createStatusBarItem: vi.fn(() => ({
+          text: '',
+          show: vi.fn(),
+          hide: vi.fn(),
+          dispose: vi.fn(),
+        })),
+      },
+      chat: {
+        registerChatSessionItemProvider: originalRegisterChatSessionItemProvider,
+      },
+      extensions: [],
+      workspace: {
+        workspaceFolders: [
+          {
+            uri: {
+              toString: () => 'file:///workspace',
+            },
+          },
+        ],
+      },
+    };
+    const context = {
+      globalStorageUri: {
+        fsPath: '/tmp/happy-vscode-bridge',
+      },
+      subscriptions: [] as Array<{ dispose(): unknown }>,
+    };
+
+    await activate(context, {
+      createRuntime,
+      token: 'test-token',
+      vscode: vscode as never,
+      installSharedCapture: ({ vscode: captureVscode }) => {
+        expect(
+          captureVscode.chat?.registerChatSessionItemProvider,
+        ).toBe(originalRegisterChatSessionItemProvider);
+        expect(captureVscode.chat?.registerChatSessionItemProvider).not.toBe(
+          vscode.chat.registerChatSessionItemProvider,
+        );
+
+        return {
+          diagnostics: {
+            installed: false,
+            targetKind: null,
+            failureReason: 'test',
+          },
+          dispose: vi.fn(),
+        };
+      },
+    } as never);
+
+    await deactivate();
+  });
+});

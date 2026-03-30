@@ -111,6 +111,116 @@ async function spawnAndWaitForDaemon(): Promise<boolean> {
       process.exit(1)
     }
     return;
+  } else if (subcommand === 'broker-attached-session') {
+    try {
+      const { runBrokerAttachedSession } = await import('@/broker/runBrokerAttachedSession');
+
+      let startedBy: 'daemon' | 'terminal' | undefined = undefined;
+      let brokerRootDir: string | undefined = undefined;
+      let brokerUrl: string | undefined = undefined;
+      let brokerSessionId: string | undefined = undefined;
+      let brokerWindowInstanceId: string | undefined = undefined;
+      let brokerWindowLabel: string | undefined = undefined;
+      let brokerWorkspaceLabel: string | undefined = undefined;
+      let brokerWorkspacePath: string | undefined = undefined;
+      let brokerWindowOrdinal: number | undefined = undefined;
+      let brokerWindowIsActive: boolean | undefined = undefined;
+      let brokerWindowLastActiveAt: string | undefined = undefined;
+
+      for (let i = 1; i < args.length; i++) {
+        if (args[i] === '--started-by') {
+          startedBy = args[++i] as 'daemon' | 'terminal';
+          continue;
+        }
+        if (args[i] === '--broker-root-dir') {
+          brokerRootDir = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-url') {
+          brokerUrl = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-session-id') {
+          brokerSessionId = args[++i];
+          continue;
+        }
+        if (args[i] === '--window-instance-id') {
+          brokerWindowInstanceId = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-window-label') {
+          brokerWindowLabel = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-workspace-label') {
+          brokerWorkspaceLabel = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-workspace-path') {
+          brokerWorkspacePath = args[++i];
+          continue;
+        }
+        if (args[i] === '--broker-window-ordinal') {
+          const parsedOrdinal = Number(args[++i]);
+          brokerWindowOrdinal = Number.isFinite(parsedOrdinal)
+            ? parsedOrdinal
+            : undefined;
+          continue;
+        }
+        if (args[i] === '--broker-window-is-active') {
+          const value = args[++i];
+          brokerWindowIsActive =
+            value === 'true' ? true : value === 'false' ? false : undefined;
+          continue;
+        }
+        if (args[i] === '--broker-window-last-active-at') {
+          brokerWindowLastActiveAt = args[++i];
+          continue;
+        }
+      }
+
+      if (!brokerSessionId) {
+        throw new Error('Missing required argument: --broker-session-id');
+      }
+
+      const {
+        credentials
+      } = await authAndSetupMachineIfNeeded();
+
+      logger.debug('Ensuring Happy background service is running & matches our version...');
+      if (!(await isDaemonRunningCurrentlyInstalledHappyVersion())) {
+        logger.debug('Starting Happy background service...');
+        const daemonProcess = spawnHappyCLI(['daemon', 'start-sync'], {
+          detached: true,
+          stdio: 'ignore',
+          env: process.env
+        });
+        daemonProcess.unref();
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      await runBrokerAttachedSession({
+        credentials,
+        startedBy,
+        brokerRootDir,
+        brokerUrl,
+        brokerSessionId,
+        brokerWindowInstanceId,
+        brokerWindowLabel,
+        brokerWorkspaceLabel,
+        brokerWorkspacePath,
+        brokerWindowOrdinal,
+        brokerWindowIsActive,
+        brokerWindowLastActiveAt,
+      });
+    } catch (error) {
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error');
+      if (process.env.DEBUG) {
+        console.error(error);
+      }
+      process.exit(1);
+    }
+    return;
   } else if (subcommand === 'codex') {
     // Handle codex command
     try {

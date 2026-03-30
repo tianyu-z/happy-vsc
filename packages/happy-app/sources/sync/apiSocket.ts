@@ -73,6 +73,55 @@ class ApiSocket {
         this.setupEventHandlers();
     }
 
+    async waitUntilConnected(timeout: number = 10000): Promise<void> {
+        if (this.socket?.connected || this.currentStatus === 'connected') {
+            return;
+        }
+
+        if (!this.socket) {
+            throw new Error('Socket not connected');
+        }
+
+        await new Promise<void>((resolve, reject) => {
+            let settled = false;
+            let timeoutId: ReturnType<typeof setTimeout> | null = null;
+            let unsubscribe: (() => void) | null = null;
+
+            const cleanup = () => {
+                if (timeoutId !== null) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                if (unsubscribe) {
+                    unsubscribe();
+                    unsubscribe = null;
+                }
+            };
+
+            const resolveIfConnected = (status: 'disconnected' | 'connecting' | 'connected' | 'error') => {
+                if (settled) {
+                    return;
+                }
+
+                if (status === 'connected' || this.socket?.connected) {
+                    settled = true;
+                    cleanup();
+                    resolve();
+                }
+            };
+
+            unsubscribe = this.onStatusChange(resolveIfConnected);
+            timeoutId = setTimeout(() => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                cleanup();
+                reject(new Error(`Socket did not connect within ${timeout}ms`));
+            }, timeout);
+        });
+    }
+
     disconnect() {
         if (this.socket) {
             this.socket.disconnect();

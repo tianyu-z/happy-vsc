@@ -1,6 +1,6 @@
 import { sessionAliveEventsCounter, websocketEventsCounter } from "@/app/monitoring/metrics2";
 import { activityCache } from "@/app/presence/sessionCache";
-import { updateThinkingState } from "@/app/presence/sessionTurnRuntime";
+import { getSessionTurnState, updateThinkingState } from "@/app/presence/sessionTurnRuntime";
 import { dispatchNextPendingIfPossible } from "@/app/session/pendingMessageAutoDispatch";
 import { buildMessageDeliveryClearedEphemeral, buildMessageDeliveryErrorEphemeral, buildMessageErrorEphemeral, buildMessageSyncingEphemeral, buildMessageSyncedEphemeral, buildNewMessageUpdate, buildSessionActivityEphemeral, buildUpdateSessionUpdate, ClientConnection, eventRouter } from "@/app/events/eventRouter";
 import { db } from "@/storage/db";
@@ -10,6 +10,8 @@ import { log } from "@/utils/log";
 import { randomKeyNaked } from "@/utils/randomKeyNaked";
 import { Socket } from "socket.io";
 import { delay } from "@/utils/delay";
+
+const IDLE_HEARTBEAT_RECONNECT_GAP_MS = 10_000;
 
 /**
  * Check if there's an active CLI (session-scoped) connection for a session.
@@ -205,8 +207,16 @@ export function sessionUpdateHandler(userId: string, socket: Socket, connection:
             // Queue database update (will only update if time difference is significant)
             activityCache.queueSessionUpdate(sid, t);
 
+            const previousTurnState = getSessionTurnState(sid, t);
+            const resumedIdleHeartbeat = !thinking
+                && !previousTurnState.thinking
+                && (
+                    previousTurnState.lastHeartbeatAt === 0
+                    || t - previousTurnState.lastHeartbeatAt >= IDLE_HEARTBEAT_RECONNECT_GAP_MS
+                );
+
             const thinkingState = updateThinkingState(sid, !!thinking, t);
-            if (thinkingState.turnEnded) {
+            if (thinkingState.turnEnded || resumedIdleHeartbeat) {
                 // Acquire receiveMessageLock to ensure any in-flight 'message' event
                 // (e.g. the AI's final response) finishes before we dispatch the next
                 // pending message, preventing the queued message from arriving before

@@ -4,6 +4,7 @@
  */
 
 import { apiSocket } from './apiSocket';
+import { brokerDiscoveredSessionSchema, type BrokerDiscoveredSession } from './brokerTypes';
 import { sync } from './sync';
 import type { MachineMetadata, Metadata } from './storageTypes';
 
@@ -245,6 +246,59 @@ export async function machineSpawnNewSession(options: SpawnSessionOptions): Prom
         return {
             type: 'error',
             errorMessage: error instanceof Error ? error.message : 'Failed to spawn session'
+        };
+    }
+}
+
+export async function machineListBrokerSessions(
+    machineId: string,
+): Promise<{ sessions: BrokerDiscoveredSession[] }> {
+    await apiSocket.waitUntilConnected();
+
+    const result = await apiSocket.machineRPC<{
+        sessions?: unknown;
+        error?: string;
+    }, {}>(
+        machineId,
+        'broker-list-sessions',
+        {},
+    );
+
+    if (!result) {
+        throw new Error('RPC returned empty response');
+    }
+    if (result.error) {
+        throw new Error(result.error);
+    }
+
+    if (!Array.isArray(result.sessions)) {
+        throw new Error('Invalid broker sessions response');
+    }
+
+    return {
+        sessions: result.sessions.flatMap((session) => {
+            const parsed = brokerDiscoveredSessionSchema.safeParse(session);
+            return parsed.success ? [parsed.data] : [];
+        }),
+    };
+}
+
+export async function machineAttachBrokerSession(
+    machineId: string,
+    brokerSessionId: string,
+): Promise<SpawnSessionResult> {
+    try {
+        return await apiSocket.machineSpawnHTTP<SpawnSessionResult>(
+            machineId,
+            {
+                type: 'broker-attach-session',
+                brokerSessionId,
+            },
+        );
+    } catch (error) {
+        return {
+            type: 'error',
+            errorMessage: error instanceof Error ? error.message : 'Failed to attach broker session',
         };
     }
 }

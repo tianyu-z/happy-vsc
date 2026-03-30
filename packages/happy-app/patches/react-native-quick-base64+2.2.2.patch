@@ -1,0 +1,14 @@
+diff --git a/node_modules/react-native-quick-base64/android/build.gradle b/node_modules/react-native-quick-base64/android/build.gradle
+index 6a104e7..51f6550 100644
+--- a/node_modules/react-native-quick-base64/android/build.gradle
++++ b/node_modules/react-native-quick-base64/android/build.gradle
+@@ -41,6 +41,9 @@ android {
+   namespace 'com.reactnativequickbase64'
+ 
+   compileSdkVersion getExtOrIntegerDefault("compileSdkVersion")
++  if (rootProject.hasProperty("ndkVersion")) {
++    ndkVersion rootProject.ext.ndkVersion
++  }
+ 
+   defaultConfig {
+     minSdkVersion getExtOrIntegerDefault("minSdkVersion")

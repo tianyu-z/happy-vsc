@@ -311,6 +311,18 @@ export const MessageContentSchema = z.union([UserMessageSchema, AgentMessageSche
 
 export type MessageContent = z.infer<typeof MessageContentSchema>
 
+export type BrokerDesiredMode = 'runtime_preferred' | 'storage_preferred'
+export type BrokerEffectiveMode = 'runtime' | 'storage'
+export type BrokerCompatibility = 'supported' | 'unknown' | 'incompatible'
+export type BrokerProviderExtension = {
+  id: string,
+  version: string,
+}
+export type BrokerProbeHealth = {
+  runtime: 'ready' | 'degraded' | 'unavailable',
+  storage: 'ready' | 'stale' | 'unavailable',
+}
+
 export type Metadata = {
   path: string,
   host: string,
@@ -360,6 +372,23 @@ export type Metadata = {
   archivedBy?: string,
   archiveReason?: string,
   flavor?: string,
+  sessionSource?: 'direct' | 'broker_attached' | string,
+  brokerSessionId?: string,
+  brokerCapabilities?: string[],
+  brokerDegradedFlags?: string[],
+  brokerDesiredMode?: BrokerDesiredMode,
+  brokerEffectiveMode?: BrokerEffectiveMode,
+  brokerModeReason?: string,
+  brokerCompatibility?: BrokerCompatibility,
+  brokerProviderExtension?: BrokerProviderExtension,
+  brokerProbeHealth?: BrokerProbeHealth,
+  windowInstanceId?: string,
+  brokerWindowLabel?: string,
+  brokerWorkspaceLabel?: string,
+  brokerWorkspacePath?: string,
+  brokerWindowOrdinal?: number,
+  brokerWindowIsActive?: boolean,
+  brokerWindowLastActiveAt?: string,
   // Worktree metadata
   isWorktree?: boolean,
   worktreeBasePath?: string,

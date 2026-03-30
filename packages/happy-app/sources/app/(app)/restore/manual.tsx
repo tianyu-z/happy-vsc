@@ -4,7 +4,7 @@ import { useNavigation, CommonActions } from '@react-navigation/native';
 import { useAuth } from '@/auth/AuthContext';
 import { RoundButton } from '@/components/RoundButton';
 import { Typography } from '@/constants/Typography';
-import { normalizeSecretKey } from '@/auth/secretKeyBackup';
+import { normalizeRestoreInput } from '@/auth/restoreCredentialsInput';
 import { authGetToken } from '@/auth/authGetToken';
 import { decodeBase64 } from '@/encryption/base64';
 import { layout } from '@/components/layout';
@@ -77,23 +77,31 @@ export default function Restore() {
         }
 
         try {
-            // Normalize the key (handles both base64url and formatted input)
-            const normalizedKey = normalizeSecretKey(trimmedKey);
+            const normalizedInput = normalizeRestoreInput(trimmedKey);
+            let token: string;
+            let secret: string;
 
-            // Validate the secret key format
-            const secretBytes = decodeBase64(normalizedKey, 'base64url');
-            if (secretBytes.length !== 32) {
-                throw new Error('Invalid secret key length');
-            }
+            if (normalizedInput.type === 'credentials') {
+                token = normalizedInput.credentials.token;
+                secret = normalizedInput.credentials.secret;
+            } else {
+                secret = normalizedInput.secret;
 
-            // Get token from secret
-            const token = await authGetToken(secretBytes);
-            if (!token) {
-                throw new Error('Failed to authenticate with provided key');
+                // Validate the secret key format
+                const secretBytes = decodeBase64(secret, 'base64url');
+                if (secretBytes.length !== 32) {
+                    throw new Error('Invalid secret key length');
+                }
+
+                // Get token from secret
+                token = await authGetToken(secretBytes);
+                if (!token) {
+                    throw new Error('Failed to authenticate with provided key');
+                }
             }
 
             // Login with new credentials
-            await auth.login(token, normalizedKey);
+            await auth.login(token, secret);
 
             // Reset navigation stack and go to home
             navigation.dispatch(

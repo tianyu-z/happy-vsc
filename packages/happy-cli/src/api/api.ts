@@ -9,6 +9,7 @@ import { configuration } from '@/configuration';
 import chalk from 'chalk';
 import { Credentials } from '@/persistence';
 import { connectionState, isNetworkError } from '@/utils/serverConnectionErrors';
+import { readSessionDataKey, writeSessionDataKey } from './sessionDataKeyCache';
 
 export class ApiClient {
 
@@ -37,33 +38,43 @@ export class ApiClient {
     let dataEncryptionKey: Uint8Array | null = null;
     let encryptionKey: Uint8Array;
     let encryptionVariant: 'legacy' | 'dataKey';
+    let cachedSessionDataKey: Uint8Array | null = null;
+    const buildEncryptedSessionDataKey = (
+      dataKey: Uint8Array,
+      publicKey: Uint8Array,
+    ): Uint8Array => {
+      const encryptedDataKey = libsodiumEncryptForPublicKey(
+        dataKey,
+        publicKey,
+      );
+      const bundledDataKey = new Uint8Array(encryptedDataKey.length + 1);
+      bundledDataKey.set([0], 0);
+      bundledDataKey.set(encryptedDataKey, 1);
+      return bundledDataKey;
+    };
+
     if (this.credential.encryption.type === 'dataKey') {
-
-      // Generate new encryption key
-      encryptionKey = getRandomBytes(32);
+      cachedSessionDataKey = await readSessionDataKey(opts.tag);
+      encryptionKey = cachedSessionDataKey ?? getRandomBytes(32);
       encryptionVariant = 'dataKey';
-
-      // Derive and encrypt data encryption key
-      // const contentDataKey = await deriveKey(this.secret, 'Happy EnCoder', ['content']);
-      // const publicKey = libsodiumPublicKeyFromSecretKey(contentDataKey);
-      let encryptedDataKey = libsodiumEncryptForPublicKey(encryptionKey, this.credential.encryption.publicKey);
-      dataEncryptionKey = new Uint8Array(encryptedDataKey.length + 1);
-      dataEncryptionKey.set([0], 0); // Version byte
-      dataEncryptionKey.set(encryptedDataKey, 1); // Data key
+      dataEncryptionKey = buildEncryptedSessionDataKey(
+        encryptionKey,
+        this.credential.encryption.publicKey,
+      );
     } else {
       encryptionKey = this.credential.encryption.secret;
       encryptionVariant = 'legacy';
     }
 
-    // Create session
-    try {
-      const response = await axios.post<CreateSessionResponse>(
+    const postSession = async (refreshOnExisting: boolean = false) => {
+      return await axios.post<CreateSessionResponse>(
         `${configuration.serverUrl}/v1/sessions`,
         {
           tag: opts.tag,
           metadata: encodeBase64(encrypt(encryptionKey, encryptionVariant, opts.metadata)),
           agentState: opts.state ? encodeBase64(encrypt(encryptionKey, encryptionVariant, opts.state)) : null,
           dataEncryptionKey: dataEncryptionKey ? encodeBase64(dataEncryptionKey) : null,
+          ...(refreshOnExisting ? { refreshOnExisting: true } : {}),
         },
         {
           headers: {
@@ -72,20 +83,58 @@ export class ApiClient {
           },
           timeout: 60000 // 1 minute timeout for very bad network connections
         }
-      )
+      );
+    };
+
+    // Create session
+    try {
+      let response = await postSession();
 
       logger.debug(`Session created/loaded: ${response.data.session.id} (tag: ${opts.tag})`)
       let raw = response.data.session;
+      let decryptedMetadata = decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.metadata));
+      let decryptedAgentState = raw.agentState
+        ? decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.agentState))
+        : opts.state;
+
+      if (
+        this.credential.encryption.type === 'dataKey' &&
+        decryptedMetadata === null
+      ) {
+        logger.debug(
+          `[API] Session metadata decryption failed for tag ${opts.tag}, refreshing existing session data key`,
+        );
+        if (cachedSessionDataKey) {
+          encryptionKey = getRandomBytes(32);
+          dataEncryptionKey = buildEncryptedSessionDataKey(
+            encryptionKey,
+            this.credential.encryption.publicKey,
+          );
+        }
+
+        response = await postSession(true);
+        raw = response.data.session;
+        decryptedMetadata = decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.metadata));
+        decryptedAgentState = raw.agentState
+          ? decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.agentState))
+          : opts.state;
+      }
+
       let session: Session = {
         id: raw.id,
         seq: raw.seq,
-        metadata: decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.metadata)),
+        metadata: decryptedMetadata ?? opts.metadata,
         metadataVersion: raw.metadataVersion,
-        agentState: raw.agentState ? decrypt(encryptionKey, encryptionVariant, decodeBase64(raw.agentState)) : null,
+        agentState: decryptedAgentState ?? opts.state,
         agentStateVersion: raw.agentStateVersion,
         encryptionKey: encryptionKey,
         encryptionVariant: encryptionVariant
       }
+
+      if (this.credential.encryption.type === 'dataKey') {
+        await writeSessionDataKey(opts.tag, encryptionKey);
+      }
+
       return session;
     } catch (error) {
       logger.debug('[API] [ERROR] Failed to get or create session:', error);

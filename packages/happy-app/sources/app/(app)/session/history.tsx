@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent, Pressable, TextInput } from 'react-native';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Item } from '@/components/Item';
 import { ItemGroup } from '@/components/ItemGroup';
@@ -33,6 +33,7 @@ import { t } from '@/text';
 import { sync } from '@/sync/sync';
 import { formatPathRelativeToHome } from '@/utils/sessionUtils';
 import { MMKV } from 'react-native-mmkv';
+import { createSessionHref } from '@/utils/sessionNavigation';
 
 const mmkv = new MMKV();
 const SELECTED_MACHINE_KEY = 'agent-history-selected-machine';
@@ -190,6 +191,7 @@ function getSessionTitle(entry: AgentSessionIndexEntry): string {
 export default function AgentHistoryPage() {
     const { theme } = useUnistyles();
     const router = useRouter();
+    const pathname = usePathname();
     const machines = useAllMachines();
     const pageSize = 50;
     const loadMoreInFlightRef = React.useRef(false);
@@ -508,7 +510,7 @@ export default function AgentHistoryPage() {
 
             if (result.type === 'success') {
                 await sync.refreshSessions();
-                router.push(`/session/${result.sessionId}`, {
+                router.push(createSessionHref(result.sessionId, pathname), {
                     dangerouslySingular() {
                         return 'session';
                     },
@@ -520,7 +522,7 @@ export default function AgentHistoryPage() {
         } finally {
             setResumingSessionId(null);
         }
-    }, [selectedMachineId, resumingSessionId, router]);
+    }, [selectedMachineId, resumingSessionId, router, pathname]);
 
     const handleResumeFromPreview = React.useCallback(() => {
         if (previewEntry) {

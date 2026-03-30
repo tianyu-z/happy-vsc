@@ -11,10 +11,10 @@ import { readdirSync } from 'node:fs';
 import os from 'node:os';
 import { resolve, join } from 'node:path';
 
-import type { AgentState, Metadata } from '@/api/types';
-import { configuration } from '@/configuration';
-import { projectPath } from '@/projectPath';
-import { detectGitWorktree } from '@/utils/gitWorktree';
+import { configuration } from '../configuration';
+import { projectPath } from '../projectPath';
+import type { AgentState, Metadata } from '../api/types';
+import { detectGitWorktree } from './gitWorktree';
 import packageJson from '../../package.json';
 
 /**
@@ -32,6 +32,25 @@ export interface CreateSessionMetadataOptions {
     machineId: string;
     /** How the session was started */
     startedBy?: 'daemon' | 'terminal';
+    /** Session source marker */
+    source?: 'direct' | 'broker_attached';
+    /** Broker attachment metadata */
+    brokerSessionId?: string;
+    brokerCapabilities?: string[];
+    brokerDegradedFlags?: string[];
+    brokerDesiredMode?: Metadata['brokerDesiredMode'];
+    brokerEffectiveMode?: Metadata['brokerEffectiveMode'];
+    brokerModeReason?: Metadata['brokerModeReason'];
+    brokerCompatibility?: Metadata['brokerCompatibility'];
+    brokerProviderExtension?: Metadata['brokerProviderExtension'];
+    brokerProbeHealth?: Metadata['brokerProbeHealth'];
+    windowInstanceId?: string;
+    brokerWindowLabel?: string;
+    brokerWorkspaceLabel?: string;
+    brokerWorkspacePath?: string;
+    brokerWindowOrdinal?: number;
+    brokerWindowIsActive?: boolean;
+    brokerWindowLastActiveAt?: string;
 }
 
 /**
@@ -137,13 +156,43 @@ function detectWorktreeMetadata(): Partial<Metadata> {
     return {};
 }
 
+function getMissingBrokerAttachedWindowFields(
+    opts: CreateSessionMetadataOptions,
+): string[] {
+    const missing: string[] = [];
+
+    if (!opts.windowInstanceId) missing.push('windowInstanceId');
+    if (!opts.brokerWindowLabel) missing.push('brokerWindowLabel');
+    if (!opts.brokerWorkspaceLabel) missing.push('brokerWorkspaceLabel');
+    if (!opts.brokerWorkspacePath) missing.push('brokerWorkspacePath');
+    if (typeof opts.brokerWindowOrdinal !== 'number') {
+        missing.push('brokerWindowOrdinal');
+    }
+
+    return missing;
+}
+
 export function createSessionMetadata(opts: CreateSessionMetadataOptions): SessionMetadataResult {
+    if (opts.source === 'broker_attached') {
+        const missingFields = getMissingBrokerAttachedWindowFields(opts);
+        if (missingFields.length > 0) {
+            throw new Error(
+                `Missing broker-attached metadata fields: ${missingFields.join(', ')}`,
+            );
+        }
+    }
+
     const state: AgentState = {
         controlledByUser: false,
     };
 
+    const sessionPath =
+        opts.source === 'broker_attached' && opts.brokerWorkspacePath
+            ? opts.brokerWorkspacePath
+            : process.cwd();
+
     const metadata: Metadata = {
-        path: process.cwd(),
+        path: sessionPath,
         host: os.hostname(),
         version: packageJson.version,
         os: os.platform(),
@@ -158,6 +207,25 @@ export function createSessionMetadata(opts: CreateSessionMetadataOptions): Sessi
         lifecycleState: 'running',
         lifecycleStateSince: Date.now(),
         flavor: opts.flavor,
+        ...(opts.source ? {
+            sessionSource: opts.source,
+            brokerSessionId: opts.brokerSessionId,
+            brokerCapabilities: opts.brokerCapabilities,
+            brokerDegradedFlags: opts.brokerDegradedFlags,
+            brokerDesiredMode: opts.brokerDesiredMode,
+            brokerEffectiveMode: opts.brokerEffectiveMode,
+            brokerModeReason: opts.brokerModeReason,
+            brokerCompatibility: opts.brokerCompatibility,
+            brokerProviderExtension: opts.brokerProviderExtension,
+            brokerProbeHealth: opts.brokerProbeHealth,
+            windowInstanceId: opts.windowInstanceId,
+            brokerWindowLabel: opts.brokerWindowLabel,
+            brokerWorkspaceLabel: opts.brokerWorkspaceLabel,
+            brokerWorkspacePath: opts.brokerWorkspacePath,
+            brokerWindowOrdinal: opts.brokerWindowOrdinal,
+            brokerWindowIsActive: opts.brokerWindowIsActive,
+            brokerWindowLastActiveAt: opts.brokerWindowLastActiveAt,
+        } : {}),
         // Worktree metadata: env vars from daemon take priority, otherwise detect via git
         ...detectWorktreeMetadata(),
     };

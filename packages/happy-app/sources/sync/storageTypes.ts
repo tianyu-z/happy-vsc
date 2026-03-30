@@ -39,6 +39,29 @@ export const MetadataSchema = z.object({
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(), // Claude Code session ID
     codexSessionId: z.string().optional(), // Codex CLI conversation ID
+    sessionSource: z.string().optional(),
+    brokerSessionId: z.string().optional(),
+    brokerCapabilities: z.array(z.string()).optional(),
+    brokerDegradedFlags: z.array(z.string()).optional(),
+    brokerDesiredMode: z.enum(['runtime_preferred', 'storage_preferred']).optional(),
+    brokerEffectiveMode: z.enum(['runtime', 'storage']).optional(),
+    brokerModeReason: z.string().optional(),
+    brokerCompatibility: z.enum(['supported', 'unknown', 'incompatible']).optional(),
+    brokerProviderExtension: z.object({
+        id: z.string(),
+        version: z.string(),
+    }).optional(),
+    brokerProbeHealth: z.object({
+        runtime: z.enum(['ready', 'degraded', 'unavailable']),
+        storage: z.enum(['ready', 'stale', 'unavailable']),
+    }).optional(),
+    windowInstanceId: z.string().optional(),
+    brokerWindowLabel: z.string().optional(),
+    brokerWorkspaceLabel: z.string().optional(),
+    brokerWorkspacePath: z.string().optional(),
+    brokerWindowOrdinal: z.number().optional(),
+    brokerWindowIsActive: z.boolean().optional(),
+    brokerWindowLastActiveAt: z.string().optional(),
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
     homeDir: z.string().optional(), // User's home directory on the machine
@@ -71,6 +94,46 @@ export const MetadataSchema = z.object({
     }).optional(),
     sessionIcon: z.string().optional(),
     completionDismissedAt: z.number().nullish(),
+}).superRefine((metadata, ctx) => {
+    if (metadata.sessionSource !== 'broker_attached') {
+        return;
+    }
+
+    const requiredFields = [
+        {
+            key: 'windowInstanceId',
+            value: metadata.windowInstanceId,
+        },
+        {
+            key: 'brokerWindowLabel',
+            value: metadata.brokerWindowLabel,
+        },
+        {
+            key: 'brokerWorkspaceLabel',
+            value: metadata.brokerWorkspaceLabel,
+        },
+        {
+            key: 'brokerWorkspacePath',
+            value: metadata.brokerWorkspacePath,
+        },
+        {
+            key: 'brokerWindowOrdinal',
+            value: metadata.brokerWindowOrdinal,
+        },
+    ] as const;
+
+    for (const field of requiredFields) {
+        const isMissing = typeof field.value === 'number'
+            ? !Number.isFinite(field.value)
+            : !field.value;
+        if (isMissing) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: [field.key],
+                message: `${field.key} is required for broker-attached sessions`,
+            });
+        }
+    }
 });
 
 export type Metadata = z.infer<typeof MetadataSchema>;

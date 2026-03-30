@@ -1,0 +1,14 @@
+diff --git a/node_modules/react-native-keyboard-controller/android/build.gradle b/node_modules/react-native-keyboard-controller/android/build.gradle
+index 989c2c4..652a516 100644
+--- a/node_modules/react-native-keyboard-controller/android/build.gradle
++++ b/node_modules/react-native-keyboard-controller/android/build.gradle
+@@ -53,6 +53,9 @@ android {
+   }
+ 
+   compileSdkVersion getExtOrIntegerDefault('compileSdkVersion')
++  if (rootProject.hasProperty("ndkVersion")) {
++    ndkVersion rootProject.ext.ndkVersion
++  }
+   defaultConfig {
+     minSdkVersion getExtOrIntegerDefault('minSdkVersion')
+     targetSdkVersion getExtOrIntegerDefault('targetSdkVersion')

@@ -6,6 +6,7 @@
             "packages/happy-app",
             "packages/happy-cli",
             "packages/happy-server",
+            "packages/happy-vscode-bridge",
             "packages/happy-voice",
             "packages/happy-wire"
         ],
