@@ -1,0 +1,14 @@
+diff --git a/node_modules/react-native-unistyles/android/build.gradle b/node_modules/react-native-unistyles/android/build.gradle
+index 195954b..6280917 100644
+--- a/node_modules/react-native-unistyles/android/build.gradle
++++ b/node_modules/react-native-unistyles/android/build.gradle
+@@ -38,6 +38,9 @@ if (isNewArchitectureEnabled()) {
+ 
+ android {
+     compileSdkVersion safeExtGet('compileSdkVersion', 35)
++    if (rootProject.hasProperty("ndkVersion")) {
++        ndkVersion rootProject.ext.ndkVersion
++    }
+     namespace "com.unistyles"
+ 
+     defaultConfig {
