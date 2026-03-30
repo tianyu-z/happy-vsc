@@ -5,3 +5,9 @@ node_modules
 **/dist
 **/.turbo
 **/.next
+packages/happy-app/android
+packages/happy-app/ios
+packages/happy-app/dist-debug
+packages/happy-app/.expo
+packages/happy-app/src-tauri/target
+packages/happy-app/*.tsbuildinfo
